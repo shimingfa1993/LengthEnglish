@@ -1,0 +1,32 @@
+# 依赖包目录
+node_modules/
+
+# 编译输出目录
+unpackage/
+
+# 微信开发者工具生成的文件
+.DS_Store
+*.log
+
+# IDE配置文件
+.vscode/
+.idea/
+
+# 临时文件
+*.tmp
+*.swp
+*.swo
+
+# 操作系统文件
+Thumbs.db
+.DS_Store
+
+# 环境配置文件
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 微信小程序相关
+project.config.json.bak
+project.private.config.json 

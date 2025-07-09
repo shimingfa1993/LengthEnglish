@@ -1,0 +1,36 @@
+{
+	"pages": [
+		{
+			"path": "pages/index/index",
+			"style": {
+				"navigationBarTitleText": "英语学习"
+			}
+		},
+		{
+			"path": "pages/wordlist/index",
+			"style": {
+				"navigationBarTitleText": "单词列表",
+				"enablePullDownRefresh": true
+			}
+		},
+		{
+			"path": "pages/worddetail/index",
+			"style": {
+				"navigationBarTitleText": "单词详情"
+			}
+		},
+		{
+			"path": "pages/translate/index",
+			"style": {
+				"navigationBarTitleText": "百度翻译"
+			}
+		}
+	],
+	"globalStyle": {
+		"navigationBarTextStyle": "black",
+		"navigationBarTitleText": "英语学习",
+		"navigationBarBackgroundColor": "#F8F8F8",
+		"backgroundColor": "#F8F8F8"
+	},
+	"uniIdRouter": {}
+}

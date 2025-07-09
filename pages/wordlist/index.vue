@@ -115,7 +115,7 @@
 				return '?'.repeat(this.length);
 			},
 			
-			// 加载单词数据 - 使用本地词汇库
+			// 加载单词数据 - 优先使用外部API
 			async loadWords(isRefresh = false) {
 				if (this.loading) return;
 				
@@ -137,52 +137,26 @@
 				}
 				
 				try {
-					// 使用本地词汇库获取单词
-					const localWords = getCommonWords(this.length) || [];
-					
-					// 如果本地词汇库有数据，直接使用
-					if (localWords.length > 0) {
-						// 本地词汇库已经按重要性排序，常用词汇在前
-						this.allWords = [...localWords];
-						
-						// 重置分页
-						this.currentPage = 1;
-						this.displayWords = [];
-						
-						// 根据单词数量决定显示策略
-						if (this.allWords.length <= 200) {
-							// 单词不多，直接显示所有
-							this.displayWords = [...this.allWords];
-							this.showAllWords = true;
-							this.hasMore = false;
-						} else {
-							// 单词很多，使用分页显示
-							this.loadMoreFromCache();
-							this.showAllWords = false;
-						}
-						
-						// 显示成功提示
-						uni.showToast({
-							title: `已加载${this.allWords.length}个单词`,
-							icon: 'success',
-							duration: 1500
-						});
-						
-					} else {
-						// 如果本地词汇库没有该长度的单词，尝试使用API作为备选
-						await this.loadWordsFromAPI();
-					}
+					// 优先尝试从API获取单词
+					console.log('开始从API获取单词...');
+					await this.loadWordsFromAPI();
 					
 				} catch (err) {
-					console.error('加载单词失败:', err);
-					this.error = '加载失败，请检查网络连接';
-					
-					// 显示错误提示
-					uni.showToast({
-						title: '加载失败',
-						icon: 'none',
-						duration: 2000
-					});
+					console.error('API加载失败，尝试使用本地词汇库:', err);
+					// API失败时，使用本地词汇库作为备选
+					try {
+						await this.loadWordsFromLocal();
+					} catch (localErr) {
+						console.error('加载单词失败:', localErr);
+						this.error = '加载失败，请检查网络连接';
+						
+						// 显示错误提示
+						uni.showToast({
+							title: '加载失败',
+							icon: 'none',
+							duration: 2000
+						});
+					}
 				} finally {
 					this.loading = false;
 					this.refreshing = false;
@@ -194,52 +168,106 @@
 				}
 			},
 			
-			// 备用方法：从API加载单词（当本地词汇库没有数据时）
+			// 从API加载单词
 			async loadWordsFromAPI() {
-				try {
-					const pattern = this.generateSearchPattern();
+				console.log(`正在从API获取${this.length}字母单词...`);
+				
+				const pattern = this.generateSearchPattern();
+				
+				// 显示加载提示
+				uni.showToast({
+					title: '正在从网络获取单词...',
+					icon: 'loading',
+					duration: 3000
+				});
+				
+				const response = await uni.request({
+					url: 'https://api.datamuse.com/words',
+					method: 'GET',
+					data: {
+						sp: pattern,
+						max: 2000 // 增加获取数量
+					},
+					timeout: 10000, // 设置10秒超时
+					header: {
+						'Content-Type': 'application/json'
+					}
+				});
+				
+				console.log('API响应状态:', response.statusCode);
+				console.log('API响应数据长度:', response.data?.length || 0);
+				
+				if (response.statusCode === 200 && response.data && response.data.length > 0) {
+					// 获取原始单词列表
+					const originalWords = response.data.map(item => item.word);
+					console.log('获取到的原始单词数量:', originalWords.length);
 					
-					const response = await uni.request({
-						url: 'https://api.datamuse.com/words',
-						method: 'GET',
-						data: {
-							sp: pattern,
-							max: 1000
-						}
+					// 使用常用单词库重新排序，常用单词排在前面
+					this.allWords = this.sortWordsByImportance(originalWords);
+					
+					// 重置分页
+					this.currentPage = 1;
+					this.displayWords = [];
+					
+					// 根据单词数量决定显示策略
+					if (this.allWords.length <= 500) {
+						this.displayWords = [...this.allWords];
+						this.showAllWords = true;
+						this.hasMore = false;
+					} else {
+						this.loadMoreFromCache();
+						this.showAllWords = false;
+					}
+					
+					uni.showToast({
+						title: `网络加载${this.allWords.length}个单词成功`,
+						icon: 'success',
+						duration: 2000
 					});
 					
-					if (response.statusCode === 200 && response.data.length > 0) {
-						// 获取原始单词列表
-						const originalWords = response.data.map(item => item.word);
-						
-						// 使用常用单词库重新排序，常用单词排在前面
-						this.allWords = this.sortWordsByImportance(originalWords);
-						
-						// 重置分页
-						this.currentPage = 1;
-						this.displayWords = [];
-						
-						// 根据单词数量决定显示策略
-						if (this.allWords.length <= 200) {
-							this.displayWords = [...this.allWords];
-							this.showAllWords = true;
-							this.hasMore = false;
-						} else {
-							this.loadMoreFromCache();
-							this.showAllWords = false;
-						}
-						
-						uni.showToast({
-							title: `已从网络加载${this.allWords.length}个单词`,
-							icon: 'success',
-							duration: 1500
-						});
+					console.log('API加载成功，单词数量:', this.allWords.length);
+				} else {
+					throw new Error(`API返回状态码: ${response.statusCode}, 数据: ${JSON.stringify(response.data)}`);
+				}
+			},
+			
+			// 从本地词汇库加载单词（备选方案）
+			async loadWordsFromLocal() {
+				console.log(`从本地词汇库获取${this.length}字母单词...`);
+				
+				// 使用本地词汇库获取单词
+				const localWords = getCommonWords(this.length) || [];
+				
+				if (localWords.length > 0) {
+					// 本地词汇库已经按重要性排序，常用词汇在前
+					this.allWords = [...localWords];
+					
+					// 重置分页
+					this.currentPage = 1;
+					this.displayWords = [];
+					
+					// 根据单词数量决定显示策略
+					if (this.allWords.length <= 200) {
+						// 单词不多，直接显示所有
+						this.displayWords = [...this.allWords];
+						this.showAllWords = true;
+						this.hasMore = false;
 					} else {
-						this.error = `暂无${this.length}字母的单词`;
+						// 单词很多，使用分页显示
+						this.loadMoreFromCache();
+						this.showAllWords = false;
 					}
-				} catch (err) {
-					console.error('API加载失败:', err);
-					this.error = `暂无${this.length}字母的单词`;
+					
+					// 显示成功提示
+					uni.showToast({
+						title: `本地加载${this.allWords.length}个单词`,
+						icon: 'success',
+						duration: 2000
+					});
+					
+					console.log('本地词汇库加载成功，单词数量:', this.allWords.length);
+				} else {
+					throw new Error(`本地词汇库没有${this.length}字母的单词`);
 				}
 			},
 			

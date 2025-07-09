@@ -115,7 +115,7 @@
 				return '?'.repeat(this.length);
 			},
 			
-			// 加载单词数据
+			// 加载单词数据 - 使用本地词汇库
 			async loadWords(isRefresh = false) {
 				if (this.loading) return;
 				
@@ -137,31 +137,20 @@
 				}
 				
 				try {
-					const pattern = this.generateSearchPattern();
+					// 使用本地词汇库获取单词
+					const localWords = getCommonWords(this.length) || [];
 					
-					// 获取所有单词，不设置max限制，或设置一个很大的值
-					const response = await uni.request({
-						url: 'https://api.datamuse.com/words',
-						method: 'GET',
-						data: {
-							sp: pattern,
-							max: 10000 // 设置一个较大的值以获取更多单词
-						}
-					});
-					
-					if (response.statusCode === 200) {
-						// 获取原始单词列表
-						const originalWords = response.data.map(item => item.word);
-						
-						// 使用常用单词库重新排序，常用单词排在前面
-						this.allWords = this.sortWordsByImportance(originalWords);
+					// 如果本地词汇库有数据，直接使用
+					if (localWords.length > 0) {
+						// 本地词汇库已经按重要性排序，常用词汇在前
+						this.allWords = [...localWords];
 						
 						// 重置分页
 						this.currentPage = 1;
 						this.displayWords = [];
 						
 						// 根据单词数量决定显示策略
-						if (this.allWords.length <= 500) {
+						if (this.allWords.length <= 200) {
 							// 单词不多，直接显示所有
 							this.displayWords = [...this.allWords];
 							this.showAllWords = true;
@@ -172,19 +161,18 @@
 							this.showAllWords = false;
 						}
 						
-						if (this.allWords.length === 0) {
-							this.error = '未找到符合条件的单词';
-						} else {
-							// 显示成功提示
-							uni.showToast({
-								title: `已加载${this.allWords.length}个单词`,
-								icon: 'success',
-								duration: 2000
-							});
-						}
+						// 显示成功提示
+						uni.showToast({
+							title: `已加载${this.allWords.length}个单词`,
+							icon: 'success',
+							duration: 1500
+						});
+						
 					} else {
-						throw new Error('网络请求失败');
+						// 如果本地词汇库没有该长度的单词，尝试使用API作为备选
+						await this.loadWordsFromAPI();
 					}
+					
 				} catch (err) {
 					console.error('加载单词失败:', err);
 					this.error = '加载失败，请检查网络连接';
@@ -203,6 +191,55 @@
 					if (isRefresh) {
 						uni.stopPullDownRefresh();
 					}
+				}
+			},
+			
+			// 备用方法：从API加载单词（当本地词汇库没有数据时）
+			async loadWordsFromAPI() {
+				try {
+					const pattern = this.generateSearchPattern();
+					
+					const response = await uni.request({
+						url: 'https://api.datamuse.com/words',
+						method: 'GET',
+						data: {
+							sp: pattern,
+							max: 1000
+						}
+					});
+					
+					if (response.statusCode === 200 && response.data.length > 0) {
+						// 获取原始单词列表
+						const originalWords = response.data.map(item => item.word);
+						
+						// 使用常用单词库重新排序，常用单词排在前面
+						this.allWords = this.sortWordsByImportance(originalWords);
+						
+						// 重置分页
+						this.currentPage = 1;
+						this.displayWords = [];
+						
+						// 根据单词数量决定显示策略
+						if (this.allWords.length <= 200) {
+							this.displayWords = [...this.allWords];
+							this.showAllWords = true;
+							this.hasMore = false;
+						} else {
+							this.loadMoreFromCache();
+							this.showAllWords = false;
+						}
+						
+						uni.showToast({
+							title: `已从网络加载${this.allWords.length}个单词`,
+							icon: 'success',
+							duration: 1500
+						});
+					} else {
+						this.error = `暂无${this.length}字母的单词`;
+					}
+				} catch (err) {
+					console.error('API加载失败:', err);
+					this.error = `暂无${this.length}字母的单词`;
 				}
 			},
 			

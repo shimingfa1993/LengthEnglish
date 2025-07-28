@@ -155,36 +155,81 @@ class BaiduTranslateAPI {
 	}
 
 	// 获取例句
+	// 修改后的getExamples方法
 	async getExamples(word, count = 5) {
-		try {
-			// 构造一些包含该单词的常见例句查询
-			const exampleQueries = [
-				`${word} example sentence`,
-				`use ${word} in a sentence`,
-				`${word} sentence example`
-			];
-
-			const examples = [];
-			
-			for (let i = 0; i < Math.min(exampleQueries.length, count); i++) {
-				try {
-					const result = await this.translate(exampleQueries[i], 'en', 'zh');
-					if (result.trans_result && result.trans_result[0]) {
-						examples.push({
-							english: exampleQueries[i],
-							chinese: result.trans_result[0].dst
-						});
-					}
-				} catch (err) {
-					console.log('获取例句失败:', err);
-				}
-			}
-
-			return examples;
-		} catch (error) {
-			console.error('获取例句失败:', error);
-			return [];
-		}
+	    try {
+	        // 首先尝试从词典API获取例句
+	        const dictResult = await this.getDictionary(word);
+	        
+	        if (dictResult && dictResult.dict_result && dictResult.dict_result.simple_means) {
+	            const dictData = dictResult.dict_result.simple_means;
+	            
+	            // 提取真实例句
+	            if (dictData.symbols && dictData.symbols.length > 0) {
+	                const symbol = dictData.symbols[0];
+	                if (symbol.parts) {
+	                    const examples = [];
+	                    
+	                    for (const part of symbol.parts) {
+	                        if (part.means) {
+	                            for (const mean of part.means) {
+	                                // 百度词典API通常在means中包含例句
+	                                if (mean.includes('例：') || mean.includes('Example:')) {
+	                                    // 提取例句部分
+	                                    const exampleMatch = mean.match(/例：(.+?)(?:；|$)/) || mean.match(/Example: (.+?)(?:;|$)/);
+	                                    if (exampleMatch && exampleMatch[1]) {
+	                                        examples.push({
+	                                            english: exampleMatch[1].trim(),
+	                                            chinese: await this.translate(exampleMatch[1].trim(), 'en', 'zh').then(res => res.trans_result?.[0]?.dst || '')
+	                                        });
+	                                    }
+	                                }
+	                            }
+	                        }
+	                    }
+	                    
+	                    if (examples.length > 0) {
+	                        return examples.slice(0, count);
+	                    }
+	                }
+	            }
+	        }
+	        
+	        // 如果词典API没有返回例句，使用备用方案
+	        // 可以尝试调用其他例句API或使用预定义的常见例句
+	        return await this.getFallbackExamples(word, count);
+	        
+	    } catch (error) {
+	        console.error('获取例句失败:', error);
+	        return await this.getFallbackExamples(word, count);
+	    }
+	}
+	
+	// 备用例句获取方法
+	async getFallbackExamples(word, count = 5) {
+	    // 这里可以使用其他免费的例句API，或者预定义的常见例句模板
+	    const commonPatterns = [
+	        `I ${word} every day.`,
+	        `This is a good ${word}.`,
+	        `We need to ${word} now.`,
+	        `The ${word} is important.`,
+	        `Please ${word} carefully.`
+	    ];
+	    
+	    const examples = [];
+	    for (let i = 0; i < Math.min(commonPatterns.length, count); i++) {
+	        try {
+	            const chinese = await this.translate(commonPatterns[i], 'en', 'zh');
+	            examples.push({
+	                english: commonPatterns[i],
+	                chinese: chinese.trans_result?.[0]?.dst || ''
+	            });
+	        } catch (err) {
+	            console.log('备用例句获取失败:', err);
+	        }
+	    }
+	    
+	    return examples;
 	}
 
 	// 批量翻译
@@ -226,9 +271,77 @@ class BaiduTranslateAPI {
 			return 'unknown';
 		}
 	}
+
+	// 语音播放方法
+	async playTextToSpeech(text, language = 'en') {
+		try {
+			// 使用百度语音合成API（如果有权限）或备用TTS服务
+			const ttsUrls = [
+				// 主要TTS服务
+				`https://translate.google.com/translate_tts?ie=UTF-8&tl=${language}&client=tw-ob&q=${encodeURIComponent(text)}`,
+				// 备用TTS服务
+				`https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(text)}&type=1`,
+				// 另一个备用服务
+				`https://fanyi.baidu.com/gettts?lan=${language}&text=${encodeURIComponent(text)}&spd=3&source=web`
+			];
+
+			return {
+				success: true,
+				text: text,
+				language: language,
+				ttsUrls: ttsUrls,
+				playAudio: function(onSuccess, onError) {
+					if (typeof wx !== 'undefined') {
+						const innerAudioContext = wx.createInnerAudioContext();
+						
+						// 尝试播放第一个URL
+						let currentUrlIndex = 0;
+						
+						const tryPlayUrl = () => {
+							if (currentUrlIndex >= ttsUrls.length) {
+								if (onError) onError('所有TTS服务都不可用');
+								return;
+							}
+							
+							innerAudioContext.src = ttsUrls[currentUrlIndex];
+							
+							innerAudioContext.onPlay(() => {
+								console.log(`TTS播放开始 (服务${currentUrlIndex + 1}):`, text);
+								if (onSuccess) onSuccess();
+							});
+							
+							innerAudioContext.onError((res) => {
+								console.error(`TTS服务${currentUrlIndex + 1}播放失败:`, res);
+								currentUrlIndex++;
+								tryPlayUrl(); // 尝试下一个URL
+							});
+							
+							try {
+								innerAudioContext.play();
+							} catch (error) {
+								console.error(`播放TTS服务${currentUrlIndex + 1}时出错:`, error);
+								currentUrlIndex++;
+								tryPlayUrl();
+							}
+						};
+						
+						tryPlayUrl();
+					} else {
+						if (onError) onError('当前环境不支持语音播放');
+					}
+				}
+			};
+		} catch (error) {
+			console.error('创建TTS播放器失败:', error);
+			return {
+				success: false,
+				error: error.message
+			};
+		}
+	}
 }
 
 // 创建单例实例
 const baiduTranslate = new BaiduTranslateAPI();
 
-export default baiduTranslate; 
+export default baiduTranslate;

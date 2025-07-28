@@ -24,6 +24,12 @@
 			"style": {
 				"navigationBarTitleText": "百度翻译"
 			}
+		},
+		{
+			"path": "pages/flashcard/index",
+			"style": {
+				"navigationBarTitleText": "闪卡学习"
+			}
 		}
 	],
 	"globalStyle": {

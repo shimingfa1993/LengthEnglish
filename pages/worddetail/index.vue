@@ -14,10 +14,24 @@
 			</view>
 		</view>
 		
+		<!-- 本地释义区域 -->
+		<view v-if="localWordData" class="local-definition-section">
+			<view class="section-header">
+				<text class="section-title">本地释义</text>
+			</view>
+			
+			<view class="definition-content">
+				<view class="chinese-definition">
+					<text class="pos-tag">{{ localWordData.partOfSpeechChinese }}</text>
+					<text class="definition-text">{{ localWordData.chinese }}</text>
+				</view>
+			</view>
+		</view>
+		
 		<!-- 加载状态 -->
 		<view v-if="loading" class="loading-container">
 			<view class="loading-spinner"></view>
-			<text class="loading-text">正在使用百度翻译获取单词详情...</text>
+			<text class="loading-text">正在加载单词详情...</text>
 		</view>
 		
 		<!-- 错误状态 -->
@@ -42,6 +56,10 @@
 						<text class="info-label">单词:</text>
 						<text class="info-value">{{ word }}</text>
 					</view>
+					<view v-if="localWordData && localWordData.partOfSpeechChinese" class="info-item">
+						<text class="info-label">词性:</text>
+						<text class="info-value pos-tag">{{ localWordData.partOfSpeechChinese }}</text>
+					</view>
 					<view v-if="phonetic" class="info-item">
 						<text class="info-label">音标:</text>
 						<view class="phonetic-row">
@@ -55,9 +73,17 @@
 						<text class="info-label">中文释义 (百度翻译):</text>
 						<text class="info-value chinese-meaning">{{ chineseTranslation || '获取中...' }}</text>
 					</view>
+					<view v-if="localWordData && localWordData.chinese" class="info-item">
+						<text class="info-label">本地文档释义:</text>
+						<text class="info-value local-meaning">{{ localWordData.chinese }}</text>
+					</view>
 					<view v-if="simpleDefinition" class="info-item">
 						<text class="info-label">英文释义:</text>
 						<text class="info-value simple-meaning">{{ simpleDefinition }}</text>
+					</view>
+					<view v-if="localWordData && localWordData.englishDefinition" class="info-item">
+						<text class="info-label">本地英文释义:</text>
+						<text class="info-value local-english-meaning">{{ localWordData.englishDefinition }}</text>
 					</view>
 				</view>
 				
@@ -113,7 +139,10 @@
 							<view class="definition-header">
 								<text class="part-of-speech">{{ def.partOfSpeech }}</text>
 							</view>
-							<text class="definition-text">{{ def.definition }}</text>
+							<view class="definition-content">
+								<text class="definition-text">{{ def.definition }}</text>
+								<text v-if="def.chineseDefinition" class="chinese-definition">{{ def.chineseDefinition }}</text>
+							</view>
 							<view v-if="def.example" class="example">
 								<text class="example-label">例句:</text>
 								<text class="example-text">{{ def.example }}</text>
@@ -150,6 +179,7 @@
 
 <script>
 	import baiduTranslate from '@/utils/baiduTranslate.js';
+	import localWordsData from '@/utils/localWordsData.js';
 
 	export default {
 		data() {
@@ -164,15 +194,19 @@
 				wordImage: '',
 				simpleDefinition: '',
 				allExamples: [], // 所有真实例句
-				showDefinitions: false,
-				audioUrl: '',
-				chineseTranslation: '',
-				loadingMoreExamples: false
+			showDefinitions: false,
+			audioUrl: '',
+			chineseTranslation: '',
+			loadingMoreExamples: false,
+			localWordData: null // 本地单词数据
 			}
 		},
-		onLoad(options) {
+		async onLoad(options) {
 			this.word = options.word || '';
 			if (this.word) {
+				// 优先加载本地数据
+				await this.loadLocalWordData();
+				// 然后加载其他数据
 				this.loadWordDetail();
 			} else {
 				this.error = '未找到单词信息';
@@ -189,7 +223,8 @@
 				try {
 					// 并行加载所有数据
 					await Promise.all([
-						this.loadBaiduTranslation(), // 优先使用百度翻译
+						this.loadLocalWordData(), // 优先加载本地数据
+						this.loadBaiduTranslation(), // 百度翻译
 						this.loadDefinitions(),
 						this.loadRelatedWords(),
 						this.loadWordImage()
@@ -206,6 +241,32 @@
 					});
 				} finally {
 					this.loading = false;
+				}
+			},
+			
+			// 加载本地单词数据
+			async loadLocalWordData() {
+				try {
+					console.log('正在加载本地单词数据...');
+					this.localWordData = await localWordsData.getWordDetails(this.word);
+					
+					if (this.localWordData) {
+						console.log('本地单词数据加载成功:', this.localWordData);
+						
+						// 如果本地数据有中文释义，先显示
+						if (this.localWordData.chinese && !this.chineseTranslation) {
+							this.chineseTranslation = this.localWordData.chinese;
+						}
+						
+						// 如果本地数据有英文释义，设置为简单定义
+						if (this.localWordData.englishDefinition && !this.simpleDefinition) {
+							this.simpleDefinition = this.localWordData.englishDefinition;
+						}
+					} else {
+						console.log('本地数据中未找到该单词');
+					}
+				} catch (error) {
+					console.error('加载本地单词数据失败:', error);
 				}
 			},
 			
@@ -234,13 +295,31 @@
 						}
 						
 						// 设置释义
-						if (wordDetails.definitions && wordDetails.definitions.length > 0) {
-							this.definitions = wordDetails.definitions.map(def => ({
-								partOfSpeech: def.partOfSpeech || '未知',
-								definition: def.meanings ? def.meanings.join('; ') : '',
-								example: ''
-							}));
-						}
+if (wordDetails.definitions && wordDetails.definitions.length > 0) {
+	// 为每个释义添加中文翻译
+	this.definitions = await Promise.all(wordDetails.definitions.map(async (def) => {
+		let chineseTranslation = '';
+		
+		// 翻译英文释义为中文
+		if (def.meanings && def.meanings.length > 0) {
+			try {
+				const meaningText = def.meanings.join('; ');
+				const translateResult = await baiduTranslate.translate(meaningText, 'en', 'zh');
+				chineseTranslation = translateResult.trans_result?.[0]?.dst || '';
+			} catch (error) {
+				console.log('释义翻译失败:', error);
+				chineseTranslation = '翻译失败';
+			}
+		}
+		
+		return {
+			partOfSpeech: def.partOfSpeech || '未知',
+			definition: def.meanings ? def.meanings.join('; ') : '',
+			chineseDefinition: chineseTranslation,
+			example: ''
+		};
+	}));
+}
 					}
 					
 					// 获取真实例句
@@ -390,19 +469,37 @@
 						}
 						
 						// 获取详细定义（如果百度翻译没有提供）
-						if (this.definitions.length === 0 && wordData.meanings && wordData.meanings.length > 0) {
-							wordData.meanings.forEach(meaning => {
-								if (meaning.definitions && meaning.definitions.length > 0) {
-									meaning.definitions.forEach(def => {
-										this.definitions.push({
-											partOfSpeech: meaning.partOfSpeech || '未知',
-											definition: def.definition || '',
-											example: def.example || ''
-										});
+					if (this.definitions.length === 0 && wordData.meanings && wordData.meanings.length > 0) {
+						const definitionsWithTranslation = [];
+						
+						for (const meaning of wordData.meanings) {
+							if (meaning.definitions && meaning.definitions.length > 0) {
+								for (const def of meaning.definitions) {
+									let chineseTranslation = '';
+									
+									// 翻译英文释义为中文
+									if (def.definition) {
+										try {
+											const translateResult = await baiduTranslate.translate(def.definition, 'en', 'zh');
+											chineseTranslation = translateResult.trans_result?.[0]?.dst || '';
+										} catch (error) {
+											console.log('释义翻译失败:', error);
+											chineseTranslation = '翻译失败';
+										}
+									}
+									
+									definitionsWithTranslation.push({
+										partOfSpeech: meaning.partOfSpeech || '未知',
+										definition: def.definition || '',
+										chineseDefinition: chineseTranslation,
+										example: def.example || ''
 									});
 								}
-							});
+							}
 						}
+						
+						this.definitions = definitionsWithTranslation;
+					}
 					}
 				} catch (err) {
 					console.log('英文释义API请求失败:', err);
@@ -553,13 +650,49 @@
 			},
 			
 			// 播放例句发音
-			playExampleSentence(sentence) {
-				uni.showToast({
-					title: '暂不支持例句发音',
-					icon: 'none',
-					duration: 2000
-				});
-			},
+playExampleSentence(sentence) {
+	// 使用百度翻译的公共语音播放方法
+	baiduTranslate.playTextToSpeech(sentence, 'en').then(ttsPlayer => {
+		if (ttsPlayer.success) {
+			// 显示播放提示
+			uni.showToast({
+				title: '正在播放例句',
+				icon: 'none',
+				duration: 1000
+			});
+			
+			// 播放音频
+			ttsPlayer.playAudio(
+				() => {
+					// 播放成功回调
+					console.log('例句播放成功:', sentence);
+				},
+				(error) => {
+					// 播放失败回调
+					console.error('例句播放失败:', error);
+					uni.showToast({
+						title: '语音播放暂时不可用',
+						icon: 'none',
+						duration: 2000
+					});
+				}
+			);
+		} else {
+			uni.showToast({
+				title: '语音播放功能暂时不可用',
+				icon: 'none',
+				duration: 2000
+			});
+		}
+	}).catch(error => {
+		console.error('创建TTS播放器失败:', error);
+		uni.showToast({
+			title: '语音播放功能暂时不可用',
+			icon: 'none',
+			duration: 2000
+		});
+	});
+},
 			
 			// 切换定义显示
 			toggleDefinitions() {
@@ -576,7 +709,9 @@
 				uni.redirectTo({
 					url: `/pages/worddetail/index?word=${encodeURIComponent(relatedWord)}`
 				});
-			}
+			},
+			
+			
 		}
 	}
 </script>
@@ -971,11 +1106,28 @@
 		font-weight: bold;
 	}
 	
+	.definition-content {
+		margin-bottom: 12rpx;
+	}
+	
 	.definition-text {
 		font-size: 28rpx;
 		color: #2d3748;
 		line-height: 1.6;
-		margin-bottom: 12rpx;
+		margin-bottom: 8rpx;
+		display: block;
+	}
+	
+	.chinese-definition {
+		font-size: 26rpx;
+		color: #667eea;
+		line-height: 1.5;
+		background: #f7faff;
+		padding: 12rpx 16rpx;
+		border-radius: 8rpx;
+		border-left: 3rpx solid #667eea;
+		display: block;
+		font-style: italic;
 	}
 	
 	.example {
@@ -1060,4 +1212,84 @@
 		text-align: center;
 		display: block;
 	}
-</style> 
+	
+	.pos-tag {
+		background: #e74c3c;
+		color: white;
+		padding: 4rpx 12rpx;
+		border-radius: 8rpx;
+		font-size: 24rpx;
+		margin-left: 10rpx;
+	}
+	
+	.local-meaning {
+		background: #f8f9fa;
+		padding: 20rpx;
+		border-radius: 8rpx;
+		border-left: 4rpx solid #3498db;
+		margin-top: 10rpx;
+	}
+	
+	.local-english-meaning {
+		background: #fff3cd;
+		padding: 20rpx;
+		border-radius: 8rpx;
+		border-left: 4rpx solid #ffc107;
+		margin-top: 10rpx;
+		font-style: italic;
+	}
+	
+	/* 本地释义区域样式 */
+	.local-definition-section {
+		background: #f8f9ff;
+		margin: 30rpx;
+		border-radius: 24rpx;
+		padding: 32rpx;
+		border-left: 6rpx solid #667eea;
+	}
+	
+	.local-definition-section .section-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 20rpx;
+		padding-bottom: 0;
+		border-bottom: none;
+	}
+	
+	.local-definition-section .section-title {
+		font-size: 32rpx;
+		font-weight: bold;
+		color: #667eea;
+		margin-bottom: 0;
+	}
+	
+	.definition-content {
+		background: white;
+		border-radius: 16rpx;
+		padding: 24rpx;
+	}
+	
+	.chinese-definition .pos-tag {
+		display: inline-block;
+		background: #e6efff;
+		color: #667eea;
+		padding: 8rpx 16rpx;
+		border-radius: 12rpx;
+		font-size: 22rpx;
+		margin-bottom: 16rpx;
+	}
+	
+	.chinese-definition .definition-text {
+		display: block;
+		font-size: 28rpx;
+		color: #333;
+		line-height: 1.6;
+	}
+	
+	.hint-text {
+		color: #999;
+		font-size: 24rpx;
+		font-style: italic;
+	}
+</style>

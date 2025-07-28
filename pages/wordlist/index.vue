@@ -1,18 +1,44 @@
 <template>
 	<view class="container">
+		// 在模板的header部分添加
 		<view class="header">
 			<text class="title">{{ length }}字母单词</text>
 			<text class="subtitle">
-				共找到 {{ allWords.length }} 个单词
+				共找到 {{ filteredWords.length }} 个单词
+				<text v-if="selectedPartOfSpeech !== 'all'">（{{ selectedPartOfSpeechName }}）</text>
 				<text v-if="!showAllWords && hasMore">（显示前 {{ displayWords.length }} 个）</text>
 			</text>
-			<view class="priority-notice">
-				<text class="notice-text">💡 常用单词已优先显示</text>
+			
+			<!-- 词性分类切换 -->
+			<view class="pos-filter-container">
+				<scroll-view class="pos-filter-scroll" scroll-x="true">
+					<view class="pos-filter-list">
+						<view 
+							class="pos-filter-item" 
+							:class="{ active: selectedPartOfSpeech === 'all' }"
+							@click="selectPartOfSpeech('all', '全部')"
+						>
+							<text class="pos-filter-text">全部</text>
+						</view>
+						<view 
+							v-for="pos in availablePartsOfSpeech" 
+							:key="pos.key"
+							class="pos-filter-item" 
+							:class="{ active: selectedPartOfSpeech === pos.key }"
+							@click="selectPartOfSpeech(pos.key, pos.name)"
+						>
+							<text class="pos-filter-text">{{ pos.name }}</text>
+						</view>
+					</view>
+				</scroll-view>
 			</view>
 			
+			<!-- 移除整个 priority-notice 部分 -->
+			<!-- 原来的常见单词提示已删除 -->
+			
 			<!-- 显示全部按钮 -->
-			<view v-if="!showAllWords && allWords.length > displayWords.length" class="show-all-btn" @click="showAllWordsMethod">
-				<text class="btn-text">显示全部 {{ allWords.length }} 个单词</text>
+			<view v-if="!showAllWords && filteredWords.length > displayWords.length" class="show-all-btn" @click="showAllWordsMethod">
+				<text class="btn-text">显示全部{{ selectedPartOfSpeech === 'all' ? '' : selectedPartOfSpeechName }}{{ filteredWords.length }}个单词</text>
 			</view>
 		</view>
 		
@@ -22,10 +48,10 @@
 			<text class="loading-text">正在加载单词...</text>
 		</view>
 		
-		<!-- 错误状态 -->
+		<!-- 错误状态 - 移除重试按钮 -->
 		<view v-else-if="error && displayWords.length === 0" class="error-container">
 			<text class="error-text">{{ error }}</text>
-			<button class="retry-btn" @click="loadWords">重试</button>
+			<text class="error-subtitle">请返回重新选择或检查网络连接</text>
 		</view>
 		
 		<!-- 单词列表 -->
@@ -34,22 +60,20 @@
 			class="word-list" 
 			scroll-y="true"
 			@scrolltolower="loadMore"
-			refresher-enabled
-			@refresherrefresh="onRefresh"
-			:refresher-triggered="refreshing"
 		>
 			<view class="list-container">
 				<view 
 					class="word-item" 
-					v-for="(word, index) in displayWords" 
+					v-for="(wordObj, index) in displayWords" 
 					:key="index"
-					@click="goToWordDetail(word)"
+					@click="goToWordDetail(wordObj.word)"
 				>
 					<view class="word-content">
 						<view class="word-info">
-							<text class="word-text">{{ word }}</text>
-							<view v-if="isWordCommon(word)" class="common-badge">
-								<text class="badge-text">常用</text>
+							<text class="word-text">{{ wordObj.word }}</text>
+							<!-- 移除常用标签 -->
+							<view class="pos-badge">
+								<text class="pos-badge-text">{{ wordObj.partOfSpeechChinese }}</text>
 							</view>
 						</view>
 						<text class="word-number">{{ index + 1 }}</text>
@@ -65,7 +89,7 @@
 				
 				<!-- 无更多数据 -->
 				<view v-if="!hasMore && displayWords.length > 0" class="no-more">
-					<text class="no-more-text">已显示全部 {{ allWords.length }} 个单词</text>
+					<text class="no-more-text">已显示全部 {{ filteredWords.length }} 个单词</text>
 				</view>
 				
 				<!-- 分页提示 -->
@@ -75,8 +99,8 @@
 				
 				<!-- 空状态 -->
 				<view v-if="!loading && !error && displayWords.length === 0" class="empty-state">
-					<text class="empty-text">暂无{{ length }}字母的单词</text>
-					<text class="empty-subtitle">请返回选择其他长度</text>
+					<text class="empty-text">暂无{{ length }}字母的{{ selectedPartOfSpeechName }}单词</text>
+					<text class="empty-subtitle">请选择其他词性或返回选择其他长度</text>
 				</view>
 			</view>
 		</scroll-view>
@@ -85,37 +109,44 @@
 
 <script>
 	import { sortWordsByCommonness, getCommonWords, isCommonWord } from '@/utils/commonWords.js';
+	import localWordsData from '@/utils/localWordsData.js';
 
 	export default {
 		data() {
 			return {
 				length: 0,
-				wordList: [],
-				allWords: [], // 存储所有单词
+				allWords: [], // 存储所有单词对象
+				filteredWords: [], // 根据词性筛选后的单词
 				displayWords: [], // 当前显示的单词
 				loading: false,
-				refreshing: false,
+				// 移除 refreshing: false,
 				error: '',
 				hasMore: true,
 				currentPage: 1,
-				pageSize: 100, // 前端分页大小
-				showAllWords: false // 是否显示所有单词
+				pageSize: 100,
+				showAllWords: false,
+				// 词性筛选相关
+				availablePartsOfSpeech: [],
+				selectedPartOfSpeech: 'all',
+				selectedPartOfSpeechName: '全部'
 			}
 		},
 		onLoad(options) {
 			this.length = parseInt(options.length) || 1;
+			// 如果有传入词性参数，设置默认选中的词性
+			if (options.partOfSpeech) {
+				this.selectedPartOfSpeech = options.partOfSpeech;
+				this.selectedPartOfSpeechName = options.partOfSpeechName || '筛选';
+			}
 			this.loadWords();
 		},
-		onPullDownRefresh() {
-			this.onRefresh();
-		},
+		// 移除整个 onPullDownRefresh() 方法
+		// onPullDownRefresh() {
+		//     this.onRefresh();
+		// },
 		methods: {
-			// 生成搜索模式（根据长度生成对应数量的问号）
-			generateSearchPattern() {
-				return '?'.repeat(this.length);
-			},
-			
-			// 加载单词数据 - 优先使用外部API
+			// 加载单词数据 - 优先使用本地数据
+			// 加载单词数据 - 优先使用本地数据
 			async loadWords(isRefresh = false) {
 				if (this.loading) return;
 				
@@ -126,156 +157,114 @@
 					this.currentPage = 1;
 					this.hasMore = true;
 					this.allWords = [];
+					this.filteredWords = [];
 					this.displayWords = [];
-				}
-				
-				// 如果已经有所有单词数据，直接进行前端分页
-				if (this.allWords.length > 0 && !isRefresh) {
-					this.loadMoreFromCache();
-					this.loading = false;
-					return;
+					this.availablePartsOfSpeech = [];
 				}
 				
 				try {
-					// 优先尝试从API获取单词
-					console.log('开始从API获取单词...');
-					await this.loadWordsFromAPI();
+					// 从本地数据获取单词
+					console.log('开始从本地数据获取单词...');
+					await this.loadWordsFromLocal();
 					
 				} catch (err) {
-					console.error('API加载失败，尝试使用本地词汇库:', err);
-					// API失败时，使用本地词汇库作为备选
-					try {
-						await this.loadWordsFromLocal();
-					} catch (localErr) {
-						console.error('加载单词失败:', localErr);
-						this.error = '加载失败，请检查网络连接';
-						
-						// 显示错误提示
-						uni.showToast({
-							title: '加载失败',
-							icon: 'none',
-							duration: 2000
-						});
-					}
+					console.error('加载单词失败:', err);
+					this.error = '加载失败，请检查数据文件';
+					
+					uni.showToast({
+						title: '加载失败',
+						icon: 'none',
+						duration: 2000
+					});
 				} finally {
 					this.loading = false;
-					this.refreshing = false;
+					// 移除 this.refreshing = false;
 					
-					// 结束下拉刷新
 					if (isRefresh) {
 						uni.stopPullDownRefresh();
 					}
 				}
 			},
 			
-			// 从API加载单词
-			async loadWordsFromAPI() {
-				console.log(`正在从API获取${this.length}字母单词...`);
-				
-				const pattern = this.generateSearchPattern();
-				
-				// 显示加载提示
-				uni.showToast({
-					title: '正在从网络获取单词...',
-					icon: 'loading',
-					duration: 3000
-				});
-				
-				const response = await uni.request({
-					url: 'https://api.datamuse.com/words',
-					method: 'GET',
-					data: {
-						sp: pattern,
-						max: 2000 // 增加获取数量
-					},
-					timeout: 10000, // 设置10秒超时
-					header: {
-						'Content-Type': 'application/json'
-					}
-				});
-				
-				console.log('API响应状态:', response.statusCode);
-				console.log('API响应数据长度:', response.data?.length || 0);
-				
-				if (response.statusCode === 200 && response.data && response.data.length > 0) {
-					// 获取原始单词列表
-					const originalWords = response.data.map(item => item.word);
-					console.log('获取到的原始单词数量:', originalWords.length);
-					
-					// 使用常用单词库重新排序，常用单词排在前面
-					this.allWords = this.sortWordsByImportance(originalWords);
-					
-					// 重置分页
-					this.currentPage = 1;
-					this.displayWords = [];
-					
-					// 根据单词数量决定显示策略
-					if (this.allWords.length <= 500) {
-						this.displayWords = [...this.allWords];
-						this.showAllWords = true;
-						this.hasMore = false;
-					} else {
-						this.loadMoreFromCache();
-						this.showAllWords = false;
-					}
+			// 从本地数据加载单词
+			async loadWordsFromLocal() {
+				try {
+					console.log(`正在从本地数据获取${this.length}字母单词...`);
 					
 					uni.showToast({
-						title: `网络加载${this.allWords.length}个单词成功`,
-						icon: 'success',
+						title: '正在加载单词...',
+						icon: 'loading',
 						duration: 2000
 					});
 					
-					console.log('API加载成功，单词数量:', this.allWords.length);
-				} else {
-					throw new Error(`API返回状态码: ${response.statusCode}, 数据: ${JSON.stringify(response.data)}`);
+					// 获取单词数据
+					const localWords = await localWordsData.getWordsByLength(this.length);
+					// 获取可用的词性分类
+					const partsOfSpeech = await localWordsData.getAvailablePartsOfSpeech(this.length);
+					
+					console.log('本地数据获取结果:', localWords.length);
+					
+					if (localWords && localWords.length > 0) {
+						// 按常用程度排序
+						const wordList = localWords.map(item => item.word);
+						const sortedWords = sortWordsByCommonness(wordList, this.length);
+						
+						// 重新组织数据，保持排序但包含完整信息
+						this.allWords = sortedWords.map(word => {
+							const wordObj = localWords.find(item => item.word === word);
+							return wordObj || { word, partOfSpeechChinese: '未知' };
+						});
+						
+						this.availablePartsOfSpeech = partsOfSpeech;
+						
+						// 应用词性筛选
+						this.applyPartOfSpeechFilter();
+						
+						uni.showToast({
+							title: `加载完成，共${this.allWords.length}个单词`,
+							icon: 'success',
+							duration: 2000
+						});
+					} else {
+						throw new Error('本地数据中没有找到对应长度的单词');
+					}
+				} catch (error) {
+					console.error('从本地数据加载单词失败:', error);
+					throw error;
 				}
 			},
 			
-			// 从本地词汇库加载单词（备选方案）
-			async loadWordsFromLocal() {
-				console.log(`从本地词汇库获取${this.length}字母单词...`);
-				
-				// 使用本地词汇库获取单词
-				const localWords = getCommonWords(this.length) || [];
-				
-				if (localWords.length > 0) {
-					// 本地词汇库已经按重要性排序，常用词汇在前
-					this.allWords = [...localWords];
-					
-					// 重置分页
-					this.currentPage = 1;
-					this.displayWords = [];
-					
-					// 根据单词数量决定显示策略
-					if (this.allWords.length <= 200) {
-						// 单词不多，直接显示所有
-						this.displayWords = [...this.allWords];
-						this.showAllWords = true;
-						this.hasMore = false;
-					} else {
-						// 单词很多，使用分页显示
-						this.loadMoreFromCache();
-						this.showAllWords = false;
-					}
-					
-					// 显示成功提示
-					uni.showToast({
-						title: `本地加载${this.allWords.length}个单词`,
-						icon: 'success',
-						duration: 2000
-					});
-					
-					console.log('本地词汇库加载成功，单词数量:', this.allWords.length);
+			// 选择词性
+			selectPartOfSpeech(partOfSpeech, partOfSpeechName) {
+				this.selectedPartOfSpeech = partOfSpeech;
+				this.selectedPartOfSpeechName = partOfSpeechName;
+				this.applyPartOfSpeechFilter();
+			},
+			
+			// 应用词性筛选
+			applyPartOfSpeechFilter() {
+				if (this.selectedPartOfSpeech === 'all') {
+					this.filteredWords = [...this.allWords];
 				} else {
-					throw new Error(`本地词汇库没有${this.length}字母的单词`);
+					this.filteredWords = this.allWords.filter(wordObj => 
+						wordObj.partOfSpeech === this.selectedPartOfSpeech
+					);
 				}
+				
+				// 重置分页
+				this.currentPage = 1;
+				this.displayWords = [];
+				this.showAllWords = false;
+				
+				// 加载第一页数据
+				this.loadMoreFromCache();
 			},
 			
 			// 从缓存中加载更多数据（前端分页）
 			loadMoreFromCache() {
 				const startIndex = (this.currentPage - 1) * this.pageSize;
 				const endIndex = this.currentPage * this.pageSize;
-				const newWords = this.allWords.slice(startIndex, endIndex);
+				const newWords = this.filteredWords.slice(startIndex, endIndex);
 				
 				if (newWords.length > 0) {
 					this.displayWords = [...this.displayWords, ...newWords];
@@ -283,56 +272,35 @@
 				}
 				
 				// 检查是否还有更多数据
-				this.hasMore = endIndex < this.allWords.length;
+				this.hasMore = endIndex < this.filteredWords.length;
 			},
 			
 			// 下拉刷新
-			onRefresh() {
-				this.refreshing = true;
-				this.loadWords(true);
-			},
+			// 移除 onRefresh 方法
+			// onRefresh() {
+			//     this.refreshing = true;
+			//     this.loadWords(true);
+			// },
 			
 			// 加载更多
 			loadMore() {
 				if (!this.hasMore || this.loading || this.showAllWords) return;
-				
-				// 如果已经有所有数据，直接从缓存加载
-				if (this.allWords.length > 0) {
-					this.loadMoreFromCache();
-				} else {
-					this.loadWords();
-				}
+				this.loadMoreFromCache();
 			},
 			
 			// 显示所有单词
+			// 修改 showAllWordsMethod 方法
 			showAllWordsMethod() {
-				this.displayWords = [...this.allWords];
-				this.showAllWords = true;
-				this.hasMore = false;
-				
-				uni.showToast({
-					title: `已显示全部${this.allWords.length}个单词`,
-					icon: 'success',
-					duration: 2000
-				});
-			},
+			this.displayWords = [...this.filteredWords];
+			this.showAllWords = true;
+			this.hasMore = false;
 			
-			// 按重要性排序单词（常用单词优先）
-			sortWordsByImportance(words) {
-				// 使用常用单词库排序
-				const sortedWords = sortWordsByCommonness(words, this.length);
-				
-				// 统计常用单词数量
-				const commonWords = getCommonWords(this.length);
-				const commonCount = words.filter(word => 
-					commonWords.map(w => w.toLowerCase()).includes(word.toLowerCase())
-				).length;
-				
-				if (commonCount > 0) {
-					console.log(`${this.length}字母单词中找到${commonCount}个常用单词，已优先显示`);
-				}
-				
-				return sortedWords;
+			const typeText = this.selectedPartOfSpeech === 'all' ? '' : this.selectedPartOfSpeechName;
+			uni.showToast({
+			title: `已显示全部${typeText}${this.filteredWords.length}个单词`,
+			icon: 'success',
+			duration: 2000
+			});
 			},
 			
 			// 检查单词是否为常用单词
@@ -376,6 +344,76 @@
 		font-size: 26rpx;
 		color: #e2e8f0;
 		margin-bottom: 20rpx;
+	}
+	
+	/* 词性筛选样式 */
+	.pos-filter-container {
+		margin: 20rpx 0;
+	}
+	
+	.pos-filter-scroll {
+		white-space: nowrap;
+	}
+	
+	.pos-filter-list {
+		display: flex;
+		gap: 16rpx;
+		padding: 0 20rpx;
+	}
+	
+	/* 词性筛选样式 - 修改按钮尺寸 */
+	.pos-filter-item {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		padding: 8rpx 24rpx; /* 降低高度，增加宽度 */
+		border-radius: 20rpx;
+		background: rgba(255, 255, 255, 0.2);
+		border: 2rpx solid rgba(255, 255, 255, 0.3);
+		min-width: 100rpx; /* 增加最小宽度 */
+		transition: all 0.2s ease;
+	}
+	
+	.pos-filter-text {
+		font-size: 26rpx; /* 稍微增大字体 */
+		color: #ffffff;
+		font-weight: 500;
+	}
+	
+	/* 移除 pos-filter-count 相关样式 */
+	/* 移除 priority-notice 相关样式 */
+	/* 移除 common-badge 相关样式 */
+	.pos-filter-item.active {
+		background: rgba(255, 255, 255, 0.9);
+		border-color: #ffffff;
+	}
+	
+	.pos-filter-item:active {
+		transform: scale(0.95);
+	}
+	
+	.pos-filter-text {
+		font-size: 24rpx;
+		color: #ffffff;
+		font-weight: 500;
+		margin-bottom: 4rpx;
+	}
+	
+	.pos-filter-item.active .pos-filter-text {
+		color: #5a67d8;
+	}
+	
+	.pos-filter-count {
+		font-size: 20rpx;
+		color: rgba(255, 255, 255, 0.8);
+		background: rgba(255, 255, 255, 0.2);
+		padding: 2rpx 8rpx;
+		border-radius: 10rpx;
+	}
+	
+	.pos-filter-item.active .pos-filter-count {
+		color: #5a67d8;
+		background: rgba(90, 103, 216, 0.2);
 	}
 	
 	.show-all-btn {
@@ -438,10 +476,6 @@
 		transform: translateY(2rpx);
 	}
 	
-	.word-item:last-child {
-		margin-bottom: 0;
-	}
-	
 	.word-content {
 		display: flex;
 		align-items: center;
@@ -472,6 +506,21 @@
 	}
 	
 	.badge-text {
+		font-size: 20rpx;
+		font-weight: bold;
+		color: #ffffff;
+		text-shadow: 0 1rpx 2rpx rgba(0, 0, 0, 0.2);
+	}
+	
+	/* 词性标签样式 */
+	.pos-badge {
+		background: linear-gradient(135deg, #667eea, #764ba2);
+		border-radius: 12rpx;
+		padding: 4rpx 12rpx;
+		box-shadow: 0 2rpx 8rpx rgba(102, 126, 234, 0.3);
+	}
+	
+	.pos-badge-text {
 		font-size: 20rpx;
 		font-weight: bold;
 		color: #ffffff;
@@ -534,21 +583,14 @@
 	.error-text {
 		font-size: 28rpx;
 		color: #e53e3e;
-		margin-bottom: 30rpx;
+		margin-bottom: 16rpx;
 		text-align: center;
 	}
 	
-	.retry-btn {
-		background: #667eea;
-		color: white;
-		border: none;
-		border-radius: 12rpx;
-		padding: 20rpx 40rpx;
-		font-size: 28rpx;
-	}
-	
-	.retry-btn:active {
-		background: #5a67d8;
+	.error-subtitle {
+		font-size: 24rpx;
+		color: #718096;
+		text-align: center;
 	}
 	
 	/* 加载更多 */
@@ -612,4 +654,45 @@
 		font-size: 26rpx;
 		color: #718096;
 	}
-</style> 
+</style>
+
+// 在methods中添加方法
+methods: {
+	startFlashcardLearning() {
+		uni.navigateTo({
+			url: `/pages/flashcard/index?length=${this.length}`
+		});
+	}
+}
+
+// 添加CSS样式
+.flashcard-entry {
+	margin: 20rpx 0;
+	
+	.flashcard-btn {
+		width: 100%;
+		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+		color: white;
+		border: none;
+		border-radius: 15rpx;
+		padding: 25rpx;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 15rpx;
+		transition: transform 0.2s;
+		
+		&:active {
+			transform: scale(0.98);
+		}
+		
+		.btn-icon {
+			font-size: 28rpx;
+		}
+		
+		.btn-text {
+			font-size: 28rpx;
+			font-weight: bold;
+		}
+	}
+}

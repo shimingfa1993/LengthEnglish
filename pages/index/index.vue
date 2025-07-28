@@ -5,6 +5,47 @@
 			<text class="subtitle">选择单词长度开始学习，或使用百度翻译</text>
 		</view>
 		
+		<!-- 学习进度仪表板 -->
+		<view class="learning-dashboard">
+			<view class="dashboard-title">
+				<text class="title-text">📊 学习进度</text>
+			</view>
+			
+			<view class="progress-cards">
+				<view class="progress-card today">
+					<view class="card-header">
+						<text class="card-title">今日学习</text>
+						<text class="card-count">{{ learningStats.todayLearned }}/{{ learningStats.todayTarget }}</text>
+					</view>
+					<progress :percent="learningStats.todayProgress" stroke-width="8" activeColor="#007AFF"/>
+				</view>
+				
+				<view class="progress-card streak">
+					<text class="card-title">连续学习</text>
+					<text class="streak-count">{{ learningStats.learningStreak }}</text>
+					<text class="streak-unit">天</text>
+				</view>
+				
+				<view class="progress-card total">
+					<text class="card-title">总词汇量</text>
+					<text class="total-count">{{ learningStats.totalWords }}</text>
+					<text class="total-unit">个</text>
+				</view>
+			</view>
+			
+			<!-- 快速学习按钮 -->
+			<view class="quick-actions">
+				<button class="quick-btn flashcard" @click="startFlashcard">
+					<text class="btn-icon">🎴</text>
+					<text class="btn-text">闪卡学习</text>
+				</button>
+				<button class="quick-btn review" @click="startReview" :disabled="learningStats.reviewCount === 0">
+					<text class="btn-icon">🔄</text>
+					<text class="btn-text">复习 ({{ learningStats.reviewCount }})</text>
+				</button>
+			</view>
+		</view>
+
 		<!-- 快速翻译功能 -->
 		<view class="translate-section">
 			<view class="section-title">
@@ -43,7 +84,7 @@
 				<text class="more-text" @click="goToTranslatePage">更多翻译功能 ›</text>
 			</view>
 		</view>
-		
+
 		<!-- 网络测试区域 -->
 		<view class="network-test-section">
 			<view class="section-title">
@@ -77,6 +118,9 @@
 			</view>
 		</view>
 		
+		<!-- 移除整个词性筛选面板 -->
+		<!-- 原来的词性筛选面板代码已删除 -->
+		
 		<scroll-view class="word-list" scroll-y="true">
 			<view class="list-container">
 				<view 
@@ -98,6 +142,8 @@
 
 <script>
 	import baiduTranslate from '@/utils/baiduTranslate.js';
+	import localWordsData from '@/utils/localWordsData.js';
+	import LearningProgress from '@/utils/learningProgress.js';
 
 	export default {
 		data() {
@@ -107,13 +153,53 @@
 				translateResult: '',
 				translating: false,
 				testing: false,
-				testResults: []
-			}
+				testResults: [],
+				learningStats: {
+					totalWords: 0,
+					todayLearned: 0,
+					todayTarget: 10,
+					todayProgress: 0,
+					learningStreak: 0,
+					reviewCount: 0
+				}
+			};
 		},
 		onLoad() {
 			this.initWordLengthList();
+			this.loadLearningStats();
+		},
+		onShow() {
+			// 页面显示时刷新学习统计
+			this.loadLearningStats();
 		},
 		methods: {
+			// 加载学习统计
+			loadLearningStats() {
+				this.learningStats = LearningProgress.getLearningStats();
+			},
+			
+			// 开始闪卡学习
+			startFlashcard() {
+				uni.navigateTo({
+					url: '/pages/flashcard/index'
+				});
+			},
+			
+			// 开始复习
+			startReview() {
+				if (this.learningStats.reviewCount === 0) {
+					uni.showToast({
+						title: '今日无需复习',
+						icon: 'none'
+					});
+					return;
+				}
+				
+				uni.navigateTo({
+					url: '/pages/flashcard/index?mode=review'
+				});
+			},
+			
 			// 初始化单词长度列表
 			initWordLengthList() {
 				this.wordLengthList = [];
@@ -152,11 +238,27 @@
 				}
 			},
 			
-			// 跳转到单词列表页
+			// 简化：直接跳转到单词列表页面
 			goToWordList(length) {
 				uni.navigateTo({
 					url: `/pages/wordlist/index?length=${length}`
 				});
+			},
+			
+			// 新增：跳转到指定词性的单词列表
+			goToWordListWithPos(length, posType = null) {
+				this.navigateToWordList(length, posType);
+				this.showPosFilter = false;
+				this.selectedLength = null;
+			},
+			
+			// 新增：实际的页面跳转方法
+			navigateToWordList(length, posType = null) {
+				const url = posType 
+					? `/pages/wordlist/index?length=${length}&pos=${posType}`
+					: `/pages/wordlist/index?length=${length}`;
+				
+				uni.navigateTo({ url });
 			},
 			
 			// 跳转到完整翻译页面
@@ -188,7 +290,7 @@
 						name: '百度翻译API',
 						url: 'https://fanyi-api.baidu.com/api/trans/vip/translate',
 						testMethod: 'POST',
-						timeout: 8000, // 8秒超时
+						timeout: 8000,
 						testData: {
 							q: 'hello',
 							from: 'en',
@@ -202,7 +304,7 @@
 						name: '英语单词API (Datamuse)',
 						url: 'https://api.datamuse.com/words',
 						testMethod: 'GET',
-						timeout: 10000, // 10秒超时
+						timeout: 10000,
 						testData: {
 							sp: 'test',
 							max: 1
@@ -212,7 +314,7 @@
 						name: '英语词典API (DictionaryAPI)',
 						url: 'https://api.dictionaryapi.dev/api/v2/entries/en/test',
 						testMethod: 'GET',
-						timeout: 15000, // 15秒超时，海外API需要更长时间
+						timeout: 15000,
 						testData: null
 					}
 				];
@@ -225,7 +327,7 @@
 						const requestConfig = {
 							url: api.url,
 							method: api.testMethod,
-							timeout: api.timeout, // 使用各API自定义的超时时间
+							timeout: api.timeout,
 							header: {
 								'Content-Type': api.testMethod === 'POST' 
 									? 'application/x-www-form-urlencoded' 
@@ -239,8 +341,6 @@
 						
 						const response = await uni.request(requestConfig);
 						const responseTime = Date.now() - startTime;
-						
-						console.log(`${api.name} 响应:`, response);
 						
 						if (response.statusCode >= 200 && response.statusCode < 400) {
 							this.testResults.push({
@@ -329,7 +429,7 @@
 	}
 </script>
 
-<style scoped>
+<style scoped lang="scss">
 	.container {
 		min-height: 100vh;
 		background: #667eea;
@@ -365,162 +465,6 @@
 		box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.15);
 	}
 	
-	.translate-header {
-		text-align: center;
-		margin-bottom: 32rpx;
-	}
-	
-	.translate-title {
-		font-size: 36rpx;
-		font-weight: bold;
-		color: #667eea;
-	}
-	
-	.translate-input-section {
-		display: flex;
-		gap: 16rpx;
-		margin-bottom: 24rpx;
-	}
-	
-	.translate-input {
-		flex: 1;
-		background: #f7fafc;
-		border: 2rpx solid #e2e8f0;
-		border-radius: 16rpx;
-		padding: 20rpx 24rpx;
-		font-size: 28rpx;
-		color: #2d3748;
-	}
-	
-	.translate-input:focus {
-		border-color: #667eea;
-		background: #ffffff;
-	}
-	
-	.translate-btn {
-		background: #667eea;
-		color: #ffffff;
-		border: none;
-		border-radius: 16rpx;
-		padding: 20rpx 32rpx;
-		font-size: 28rpx;
-		font-weight: bold;
-		min-width: 140rpx;
-	}
-	
-	.translate-btn:disabled {
-		background: #cbd5e0;
-		color: #a0aec0;
-	}
-	
-	.translate-result {
-		background: #f0f4ff;
-		border: 2rpx solid #e6efff;
-		border-radius: 16rpx;
-		padding: 24rpx;
-		margin-bottom: 24rpx;
-	}
-	
-	.result-label {
-		display: block;
-		font-size: 24rpx;
-		color: #718096;
-		margin-bottom: 12rpx;
-	}
-	
-	.result-text {
-		display: block;
-		font-size: 32rpx;
-		color: #2d3748;
-		line-height: 1.5;
-		font-weight: 500;
-	}
-	
-	.translate-actions {
-		text-align: center;
-	}
-	
-	.action-btn {
-		background: #48bb78;
-		color: #ffffff;
-		border: none;
-		border-radius: 24rpx;
-		padding: 16rpx 40rpx;
-		font-size: 26rpx;
-		font-weight: bold;
-	}
-	
-	.translate-tips {
-		text-align: center;
-		margin-top: 16rpx;
-		padding: 12rpx;
-		background: #f0f8ff;
-		border-radius: 12rpx;
-		border: 1rpx solid #e6f3ff;
-	}
-	
-	.tips-text {
-		font-size: 22rpx;
-		color: #667eea;
-		font-weight: 500;
-	}
-	
-	.word-list {
-		background: #f7fafc;
-		min-height: 400rpx;
-	}
-	
-	.list-container {
-		padding: 40rpx 30rpx;
-	}
-	
-	.word-item {
-		background: #ffffff;
-		border-radius: 24rpx;
-		margin-bottom: 24rpx;
-		padding: 32rpx 40rpx;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.1);
-		border: 2rpx solid #e2e8f0;
-	}
-	
-	.word-item:active {
-		background: #f7fafc;
-		border-color: #667eea;
-	}
-	
-	.word-item:last-child {
-		margin-bottom: 40rpx;
-	}
-	
-	.item-content {
-		display: flex;
-		align-items: baseline;
-		flex: 1;
-	}
-	
-	.length-number {
-		font-size: 48rpx;
-		font-weight: bold;
-		color: #667eea;
-		margin-right: 12rpx;
-	}
-	
-	.length-text {
-		font-size: 32rpx;
-		color: #4a5568;
-		font-weight: 500;
-	}
-	
-	.arrow {
-		font-size: 40rpx;
-		color: #a0aec0;
-		font-weight: bold;
-	}
-	
-	/* 新增样式 */
 	.section-title {
 		margin-bottom: 25rpx;
 	}
@@ -554,6 +498,11 @@
 		color: #333;
 		margin-bottom: 20rpx;
 		box-sizing: border-box;
+	}
+	
+	.translate-input:focus {
+		border-color: #667eea;
+		background: #ffffff;
 	}
 	
 	.translate-actions {
@@ -592,6 +541,29 @@
 		border-radius: 15rpx;
 		font-size: 26rpx;
 		border: none;
+	}
+	
+	.translate-result {
+		background: #f0f4ff;
+		border: 2rpx solid #e6efff;
+		border-radius: 16rpx;
+		padding: 24rpx;
+		margin-bottom: 24rpx;
+	}
+	
+	.result-label {
+		display: block;
+		font-size: 24rpx;
+		color: #718096;
+		margin-bottom: 12rpx;
+	}
+	
+	.result-text {
+		display: block;
+		font-size: 32rpx;
+		color: #2d3748;
+		line-height: 1.5;
+		font-weight: 500;
 	}
 	
 	.more-translate {
@@ -688,5 +660,270 @@
 	.response-time {
 		font-size: 22rpx;
 		color: #999;
+	}
+	
+	/* 词性筛选面板样式 */
+	.pos-filter-panel {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.5);
+		z-index: 1000;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 60rpx;
+	}
+	
+	.filter-content {
+		background: white;
+		border-radius: 24rpx;
+		max-width: 600rpx;
+		width: 100%;
+		max-height: 80vh;
+		overflow: hidden;
+	}
+	
+	.filter-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 32rpx;
+		background: #667eea;
+		color: white;
+		border-radius: 24rpx 24rpx 0 0;
+	}
+	
+	.filter-title {
+		font-size: 32rpx;
+		font-weight: bold;
+	}
+	
+	.close-btn {
+		background: rgba(255, 255, 255, 0.2);
+		color: white;
+		border: none;
+		border-radius: 50%;
+		width: 60rpx;
+		height: 60rpx;
+		font-size: 36rpx;
+		line-height: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+	
+	.pos-grid {
+		padding: 32rpx;
+		display: grid;
+		grid-template-columns: repeat(2, 1fr);
+		gap: 20rpx;
+		max-height: 50vh;
+		overflow-y: auto;
+	}
+	
+	.pos-item {
+		background: #f7fafc;
+		border: 2rpx solid #e2e8f0;
+		border-radius: 16rpx;
+		padding: 24rpx;
+		text-align: center;
+		transition: all 0.3s ease;
+		cursor: pointer;
+	}
+	
+	.pos-item:active {
+		background: #e6efff;
+		border-color: #667eea;
+		transform: scale(0.98);
+	}
+	
+	.pos-item.all-pos {
+		background: #667eea;
+		color: white;
+		border-color: #667eea;
+	}
+	
+	.pos-name {
+		display: block;
+		font-size: 28rpx;
+		font-weight: bold;
+		margin-bottom: 8rpx;
+	}
+	
+	.pos-count {
+		display: block;
+		font-size: 22rpx;
+		color: #666;
+	}
+	
+	.all-pos .pos-count {
+		color: rgba(255, 255, 255, 0.8);
+	}
+	
+	/* 单词列表样式 */
+	.word-list {
+		background: #f7fafc;
+		min-height: 400rpx;
+	}
+	
+	.list-container {
+		padding: 40rpx 30rpx;
+	}
+	
+	.word-item {
+		background: #ffffff;
+		border-radius: 24rpx;
+		margin-bottom: 24rpx;
+		padding: 32rpx 40rpx;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.1);
+		border: 2rpx solid #e2e8f0;
+		transition: all 0.3s ease;
+	}
+	
+	.word-item:active {
+		background: #f7fafc;
+		border-color: #667eea;
+		transform: translateY(-2rpx);
+	}
+	
+	.word-item:last-child {
+		margin-bottom: 40rpx;
+	}
+	
+	.item-content {
+		display: flex;
+		align-items: baseline;
+		flex: 1;
+	}
+	
+	.length-number {
+		font-size: 48rpx;
+		font-weight: bold;
+		color: #667eea;
+		margin-right: 12rpx;
+	}
+	
+	.length-text {
+		font-size: 32rpx;
+		color: #4a5568;
+		font-weight: 500;
+	}
+	
+	.arrow {
+		font-size: 40rpx;
+		color: #a0aec0;
+		font-weight: bold;
+	}
+
+	.learning-dashboard {
+		margin: 30rpx 0;
+		padding: 30rpx;
+		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+		border-radius: 20rpx;
+		color: white;
+		
+		.dashboard-title {
+			margin-bottom: 30rpx;
+			
+			.title-text {
+				font-size: 32rpx;
+				font-weight: bold;
+			}
+		}
+		
+		.progress-cards {
+			display: flex;
+			justify-content: space-between;
+			margin-bottom: 30rpx;
+			
+			.progress-card {
+				flex: 1;
+				background: rgba(255, 255, 255, 0.2);
+				border-radius: 15rpx;
+				padding: 25rpx;
+				margin: 0 10rpx;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				
+				&.today {
+					.card-header {
+						display: flex;
+						justify-content: space-between;
+						align-items: center;
+						width: 100%;
+						margin-bottom: 15rpx;
+						
+						.card-title {
+							font-size: 24rpx;
+						}
+						
+						.card-count {
+							font-size: 28rpx;
+							font-weight: bold;
+						}
+					}
+				}
+				
+				.card-title {
+					font-size: 24rpx;
+					margin-bottom: 10rpx;
+					opacity: 0.8;
+				}
+				
+				.streak-count, .total-count {
+					font-size: 36rpx;
+					font-weight: bold;
+					margin-bottom: 5rpx;
+				}
+				
+				.streak-unit, .total-unit {
+					font-size: 20rpx;
+					opacity: 0.8;
+				}
+			}
+		}
+		
+		.quick-actions {
+			display: flex;
+			gap: 20rpx;
+			
+			.quick-btn {
+				flex: 1;
+				background: rgba(255, 255, 255, 0.9);
+				color: #333;
+				border: none;
+				border-radius: 15rpx;
+				padding: 25rpx;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				transition: transform 0.2s;
+				
+				&:active {
+					transform: scale(0.95);
+				}
+				
+				&:disabled {
+					opacity: 0.5;
+				}
+				
+				.btn-icon {
+					font-size: 32rpx;
+					margin-bottom: 10rpx;
+				}
+				
+				.btn-text {
+					font-size: 24rpx;
+					font-weight: bold;
+				}
+			}
+		}
 	}
 </style>

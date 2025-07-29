@@ -1,7 +1,10 @@
 <template>
 	<view class="container">
 		<view class="header">
-			<text class="title">英语单词学习</text>
+			<view class="header-top">
+				<text class="title">英语单词学习</text>
+				<button class="logout-btn" @click="logout">退出</button>
+			</view>
 			<text class="subtitle">选择单词长度开始学习，或使用百度翻译</text>
 		</view>
 		
@@ -143,7 +146,8 @@
 <script>
 	import baiduTranslate from '@/utils/baiduTranslate.js';
 	import localWordsData from '@/utils/localWordsData.js';
-	import LearningProgress from '@/utils/learningProgress.js';
+	import * as LearningProgress from '@/utils/learningProgress.js';
+	import { api } from '@/utils/api.js';
 
 	export default {
 		data() {
@@ -161,21 +165,128 @@
 					todayProgress: 0,
 					learningStreak: 0,
 					reviewCount: 0
-				}
+				},
+				isLoggedIn: false,
+				loading: false
 			};
 		},
 		onLoad() {
+			this.checkLoginStatus();
 			this.initWordLengthList();
-			this.loadLearningStats();
 		},
 		onShow() {
-			// 页面显示时刷新学习统计
-			this.loadLearningStats();
+			this.checkLoginStatus();
+			if (this.isLoggedIn) {
+				this.loadLearningStats();
+			}
 		},
 		methods: {
-			// 加载学习统计
-			loadLearningStats() {
-				this.learningStats = LearningProgress.getLearningStats();
+			// 检查登录状态
+			checkLoginStatus() {
+				const token = uni.getStorageSync('token');
+				this.isLoggedIn = !!token;
+				
+				if (!this.isLoggedIn) {
+					// 未登录，跳转到登录页
+					uni.reLaunch({
+						url: '/pages/login/index'
+					});
+					return;
+				}
+				
+				// 已登录，加载学习统计
+				this.loadLearningStats();
+			},
+			
+			// 加载学习统计（从后端API）
+			async loadLearningStats() {
+				if (!this.isLoggedIn) return;
+				
+				this.loading = true;
+				
+				try {
+					// 从后端获取学习统计
+					const stats = await api.getLearningStats();
+					
+					this.learningStats = {
+						totalWords: stats.totalWords || 0,
+						todayLearned: stats.todayLearned || 0,
+						todayTarget: stats.dailyTarget || 10,
+						todayProgress: stats.dailyTarget ? Math.round((stats.todayLearned / stats.dailyTarget) * 100) : 0,
+						learningStreak: stats.learningStreak || 0,
+						reviewCount: stats.reviewCount || 0
+					};
+					
+				} catch (error) {
+					console.error('获取学习统计失败:', error);
+					
+					// 如果是认证错误，跳转到登录页
+					if (error.statusCode === 401) {
+						uni.removeStorageSync('token');
+						uni.removeStorageSync('userId');
+						uni.reLaunch({
+							url: '/pages/login/index'
+						});
+						return;
+					}
+					
+					// 其他错误，使用本地数据作为备用
+					this.learningStats = LearningProgress.getLearningStats();
+					
+					uni.showToast({
+						title: '获取学习数据失败',
+						icon: 'none'
+					});
+				} finally {
+					this.loading = false;
+				}
+			},
+			
+			// 记录学习进度到后端
+			async recordLearning(wordData) {
+				if (!this.isLoggedIn) return;
+				
+				try {
+					await api.recordLearning({
+						word: wordData.word,
+						difficulty: wordData.difficulty || 'normal',
+						correct: wordData.correct || true
+					});
+					
+					// 记录成功后刷新统计
+					this.loadLearningStats();
+					
+				} catch (error) {
+					console.error('记录学习进度失败:', error);
+					// 静默失败，不影响用户体验
+				}
+			},
+			
+			// 退出登录
+			logout() {
+				uni.showModal({
+					title: '确认退出',
+					content: '确定要退出登录吗？',
+					success: (res) => {
+						if (res.confirm) {
+							uni.removeStorageSync('token');
+							uni.removeStorageSync('userId');
+							uni.reLaunch({
+								url: '/pages/login/index'
+							});
+						}
+					}
+				});
+			},
+			
+			// 初始化单词长度列表
+			initWordLengthList() {
+				this.wordLengthList = [];
+				for (let i = 1; i <= 20; i++) {
+					this.wordLengthList.push({
+						length: i
+					});
+				}
 			},
 			
 			// 开始闪卡学习
@@ -198,16 +309,6 @@
 				uni.navigateTo({
 					url: '/pages/flashcard/index?mode=review'
 				});
-			},
-			
-			// 初始化单词长度列表
-			initWordLengthList() {
-				this.wordLengthList = [];
-				for (let i = 1; i <= 20; i++) {
-					this.wordLengthList.push({
-						length: i
-					});
-				}
 			},
 			
 			// 快速翻译
@@ -245,21 +346,7 @@
 				});
 			},
 			
-			// 新增：跳转到指定词性的单词列表
-			goToWordListWithPos(length, posType = null) {
-				this.navigateToWordList(length, posType);
-				this.showPosFilter = false;
-				this.selectedLength = null;
-			},
-			
-			// 新增：实际的页面跳转方法
-			navigateToWordList(length, posType = null) {
-				const url = posType 
-					? `/pages/wordlist/index?length=${length}&pos=${posType}`
-					: `/pages/wordlist/index?length=${length}`;
-				
-				uni.navigateTo({ url });
-			},
+
 			
 			// 跳转到完整翻译页面
 			goToTranslatePage() {
@@ -438,8 +525,14 @@
 	
 	.header {
 		padding: 60rpx 40rpx 40rpx;
-		text-align: center;
 		background: #5a67d8;
+	}
+	
+	.header-top {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 20rpx;
 	}
 	
 	.title {
@@ -447,7 +540,20 @@
 		font-size: 48rpx;
 		font-weight: bold;
 		color: #ffffff;
-		margin-bottom: 20rpx;
+	}
+	
+	.logout-btn {
+		background: rgba(255, 255, 255, 0.2);
+		color: #ffffff;
+		border: 1rpx solid rgba(255, 255, 255, 0.3);
+		border-radius: 20rpx;
+		padding: 10rpx 20rpx;
+		font-size: 24rpx;
+	}
+	
+	.logout-btn:active {
+		background: rgba(255, 255, 255, 0.3);
+		transform: scale(0.95);
 	}
 	
 	.subtitle {

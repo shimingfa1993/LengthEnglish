@@ -15,12 +15,24 @@
 			</view>
 			
 			<view class="progress-cards">
-				<view class="progress-card today">
+				<view class="progress-card today" @click="startTodayLearning">
 					<view class="card-header">
-						<text class="card-title">今日学习</text>
-						<text class="card-count">{{ learningStats.todayLearned }}/{{ learningStats.todayTarget }}</text>
+						<view class="card-title">今日学习</view>
+						<view class="card-count" v-if="currentLearningLength">
+							{{ learningStats.todayLearned }}/{{ learningStats.todayTarget }}
+						</view>
+						<view class="card-count" v-else>
+							点击开始
+						</view>
 					</view>
-					<progress :percent="learningStats.todayProgress" stroke-width="8" activeColor="#007AFF"/>
+					<progress 
+						v-if="currentLearningLength" 
+						:percent="learningStats.todayProgress" 
+						stroke-width="8" 
+						activeColor="#007AFF"/>
+					<view v-else class="start-hint">
+						<text class="hint-text">选择字母数开始学习</text>
+					</view>
 				</view>
 				
 				<view class="progress-card streak">
@@ -140,16 +152,75 @@
 				</view>
 			</view>
 		</scroll-view>
+		<!-- 字母数选择弹窗 -->
+		<uni-popup ref="lengthSelector" type="center" :mask-click="false">
+		<view class="length-selector-popup">
+			<view class="popup-header">
+			<text class="popup-title">选择学习的单词长度</text>
+			<text class="popup-subtitle">建议从短单词开始学习</text>
+			</view>
+			
+			<view class="length-options">
+			<view 
+				v-for="length in availableLengths" 
+				:key="length"
+				class="length-option"
+				:class="{
+				'disabled': isLengthLocked(length),
+				'completed': isLengthCompleted(length),
+				'current': length === selectedLength
+				}"
+				@click="selectLength(length)">
+				
+				<view class="option-content">
+				<text class="length-number">{{ length }}</text>
+				<text class="length-label">字母</text>
+				</view>
+				
+				<view class="option-info">
+				<text class="word-count">{{ getWordCount(length) }}个单词</text>
+				<view class="progress-info">
+					<text v-if="isLengthCompleted(length)" class="status completed">✓ 已完成</text>
+					<text v-else-if="isLengthLocked(length)" class="status locked">🔒 未解锁</text>
+					<text v-else class="status available">可学习</text>
+				</view>
+				</view>
+				
+				<!-- 进度条 -->
+				<view class="option-progress">
+				<view 
+					class="progress-bar"
+					:style="{ width: getLengthProgress(length) + '%' }">
+				</view>
+				</view>
+			</view>
+			</view>
+			
+			<view class="popup-actions">
+			<button class="cancel-btn" @click="closeLengthSelector">取消</button>
+			<button 
+				class="confirm-btn" 
+				:disabled="!selectedLength || isLengthLocked(selectedLength)"
+				@click="confirmLengthSelection">
+				开始学习
+			</button>
+			</view>
+		</view>
+		</uni-popup>
 	</view>
 </template>
 
 <script>
 	import baiduTranslate from '@/utils/baiduTranslate.js';
-	import localWordsData from '@/utils/localWordsData.js';
-	import * as LearningProgress from '@/utils/learningProgress.js';
-	import { api } from '@/utils/api.js';
+import localWordsData from '@/utils/localWordsData.js';
+import * as LearningProgress from '@/utils/learningProgress.js';
+import { api } from '@/utils/api.js';
+import uniPopup from '@/uni_modules/uni-popup/components/uni-popup/uni-popup.vue';
 
 	export default {
+		components: {
+			uniPopup
+		},
 		data() {
 			return {
 				wordLengthList: [],
@@ -167,17 +238,44 @@
 					reviewCount: 0
 				},
 				isLoggedIn: false,
-				loading: false
+				loading: false,
+				currentLearningLength: null,
+				
+				// 选中的字母数
+				selectedLength: null,
+				
+				// 可用的字母数范围
+				availableLengths: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+				
+				// 各字母数的学习进度
+				lengthProgress: {
+					3: { completed: 0, total: 0, learned: [] },
+					4: { completed: 0, total: 0, learned: [] },
+					5: { completed: 0, total: 0, learned: [] },
+					6: { completed: 0, total: 0, learned: [] },
+					7: { completed: 0, total: 0, learned: [] },
+					8: { completed: 0, total: 0, learned: [] },
+					9: { completed: 0, total: 0, learned: [] },
+					10: { completed: 0, total: 0, learned: [] },
+					11: { completed: 0, total: 0, learned: [] },
+					12: { completed: 0, total: 0, learned: [] }
+				},
+				
+				// 单词数量统计
+				wordCounts: {}
 			};
 		},
 		onLoad() {
 			this.checkLoginStatus();
 			this.initWordLengthList();
+			this.initCurrentLearningLength();
 		},
 		onShow() {
 			this.checkLoginStatus();
 			if (this.isLoggedIn) {
 				this.loadLearningStats();
+				this.loadCurrentLearningLength();
+				this.loadLengthProgress();
 			}
 		},
 		methods: {
@@ -344,6 +442,208 @@
 				uni.navigateTo({
 					url: `/pages/wordlist/index?length=${length}`
 				});
+			},
+			
+			// 开始今日学习
+			startTodayLearning() {
+				if (!this.currentLearningLength) {
+					// 首次学习，显示字母数选择弹窗
+					this.showLengthSelector();
+				} else {
+					// 继续当前长度的学习
+					this.continueCurrentLearning();
+				}
+			},
+			
+			// 显示字母数选择弹窗
+			showLengthSelector() {
+				this.loadWordCounts();
+				this.loadLengthProgress();
+				this.$refs.lengthSelector.open();
+			},
+			
+			// 关闭字母数选择弹窗
+			closeLengthSelector() {
+				this.selectedLength = null;
+				this.$refs.lengthSelector.close();
+			},
+			
+			// 选择字母数
+			selectLength(length) {
+				if (this.isLengthLocked(length)) {
+					uni.showToast({
+						title: `请先完成${length-1}字母单词学习`,
+						icon: 'none'
+					});
+					return;
+				}
+				this.selectedLength = length;
+			},
+			
+			// 确认字母数选择
+			confirmLengthSelection() {
+				if (!this.selectedLength) return;
+				
+				this.currentLearningLength = this.selectedLength;
+				uni.setStorageSync('currentLearningLength', this.selectedLength);
+				
+				this.closeLengthSelector();
+				this.startLearningWords(this.selectedLength);
+			},
+			
+			// 开始学习指定长度的单词
+			startLearningWords(length) {
+				uni.navigateTo({
+					url: `/pages/wordlist/index?length=${length}&mode=sequential`
+				});
+			},
+			
+			// 继续当前学习
+			continueCurrentLearning() {
+				if (this.isLengthCompleted(this.currentLearningLength)) {
+					// 当前长度已完成，解锁下一个长度
+					this.unlockNextLength();
+				} else {
+					// 继续学习当前长度
+					this.startLearningWords(this.currentLearningLength);
+				}
+			},
+			
+			// 解锁下一个长度
+			unlockNextLength() {
+				const nextLength = this.currentLearningLength + 1;
+				
+				if (nextLength <= 12) {
+					uni.showModal({
+						title: '恭喜！',
+						content: `${this.currentLearningLength}字母单词已全部学完！\n现在可以学习${nextLength}字母单词了`,
+						confirmText: '开始学习',
+						cancelText: '稍后再说',
+						success: (res) => {
+							if (res.confirm) {
+								this.currentLearningLength = nextLength;
+								uni.setStorageSync('currentLearningLength', nextLength);
+								this.startLearningWords(nextLength);
+							}
+						}
+					});
+				} else {
+					uni.showToast({
+						title: '恭喜完成所有单词学习！',
+						icon: 'success'
+					});
+				}
+			},
+			
+			// 检查字母数是否被锁定
+			isLengthLocked(length) {
+				if (length === 3) return false; // 3字母永远可用
+				
+				// 检查前一个长度是否完成
+				const prevLength = length - 1;
+				return !this.isLengthCompleted(prevLength);
+			},
+			
+			// 检查字母数是否完成
+			isLengthCompleted(length) {
+				const progress = this.lengthProgress[length];
+				return progress && progress.completed >= progress.total;
+			},
+			
+			// 获取字母数进度百分比
+			getLengthProgress(length) {
+				const progress = this.lengthProgress[length];
+				if (!progress || progress.total === 0) return 0;
+				return Math.round((progress.completed / progress.total) * 100);
+			},
+			
+			// 获取单词数量
+			getWordCount(length) {
+				return this.wordCounts[length] || 0;
+			},
+			
+			// 加载单词数量统计
+			async loadWordCounts() {
+				try {
+					const wordsData = await import('@/utils/words_by_length.json');
+					
+					this.availableLengths.forEach(length => {
+						const words = wordsData.default[length.toString()];
+						this.wordCounts[length] = words ? words.length : 0;
+					});
+				} catch (error) {
+					console.error('加载单词数据失败:', error);
+				}
+			},
+			
+			// 加载学习进度
+			loadLengthProgress() {
+				this.availableLengths.forEach(length => {
+					const learned = uni.getStorageSync(`learned_words_${length}`) || [];
+					const total = this.wordCounts[length] || 0;
+					
+					this.lengthProgress[length] = {
+						completed: learned.length,
+						total: total,
+						learned: learned
+					};
+				});
+			},
+			
+			// 初始化当前学习长度
+			initCurrentLearningLength() {
+				const saved = uni.getStorageSync('currentLearningLength');
+				if (saved) {
+					this.currentLearningLength = saved;
+				}
+			},
+			
+			// 设置今日学习字母数
+			async setTodayLearningLength(length) {
+				try {
+					// 保存到本地存储
+					uni.setStorageSync('currentLearningLength', length);
+					this.currentLearningLength = length;
+					
+					// 如果有后端API，也保存到后端
+					if (this.isLoggedIn) {
+						try {
+							await api.setTodayLearningLength(length);
+						} catch (error) {
+							console.error('保存学习长度到后端失败:', error);
+						}
+					}
+					
+					uni.showToast({
+						title: `开始学习${length}字母单词`,
+						icon: 'success'
+					});
+					
+					// 跳转到学习页面
+					uni.navigateTo({
+						url: `/pages/wordlist/index?length=${length}&mode=today`
+					});
+					
+				} catch (error) {
+					console.error('设置学习长度失败:', error);
+					uni.showToast({
+						title: '设置失败，请重试',
+						icon: 'none'
+					});
+				}
+			},
+			
+			// 加载当前学习字母数
+			loadCurrentLearningLength() {
+				try {
+					// 从本地存储获取
+					const length = uni.getStorageSync('currentLearningLength');
+					if (length) {
+						this.currentLearningLength = length;
+					}
+				} catch (error) {
+					console.error('加载学习长度失败:', error);
+				}
 			},
 			
 
@@ -959,10 +1259,18 @@
 				align-items: center;
 				
 				&.today {
+					cursor: pointer;
+					transition: transform 0.2s;
+					
+					&:active {
+						transform: scale(0.95);
+					}
+					
 					.card-header {
 						display: flex;
 						justify-content: space-between;
 						align-items: center;
+						flex-direction: column;
 						width: 100%;
 						margin-bottom: 15rpx;
 						
@@ -973,6 +1281,16 @@
 						.card-count {
 							font-size: 28rpx;
 							font-weight: bold;
+						}
+					}
+					
+					.start-hint {
+						padding: 10rpx 0;
+						
+						.hint-text {
+							font-size: 22rpx;
+							opacity: 0.8;
+							text-align: center;
 						}
 					}
 				}
@@ -1028,6 +1346,165 @@
 				.btn-text {
 					font-size: 24rpx;
 					font-weight: bold;
+				}
+			}
+		}
+	}
+
+	.start-hint {
+		text-align: center;
+		padding: 20rpx 0;
+		
+		.hint-text {
+			color: #666;
+			font-size: 26rpx;
+		}
+	}
+
+	.length-selector-popup {
+		width: 600rpx;
+		background: white;
+		border-radius: 20rpx;
+		padding: 40rpx;
+		
+		.popup-header {
+			text-align: center;
+			margin-bottom: 40rpx;
+			
+			.popup-title {
+				font-size: 36rpx;
+				font-weight: 600;
+				color: #333;
+				display: block;
+			}
+			
+			.popup-subtitle {
+				font-size: 26rpx;
+				color: #666;
+				margin-top: 12rpx;
+				display: block;
+			}
+		}
+		
+		.length-options {
+			max-height: 500rpx;
+			overflow-y: auto;
+			
+			.length-option {
+				display: flex;
+				align-items: center;
+				padding: 24rpx;
+				margin-bottom: 16rpx;
+				border-radius: 16rpx;
+				border: 2rpx solid #f0f0f0;
+				position: relative;
+				transition: all 0.3s;
+				
+				&.current {
+					border-color: #007AFF;
+					background: #f0f8ff;
+				}
+				
+				&.completed {
+					background: #f0fff0;
+					border-color: #4CAF50;
+				}
+				
+				&.disabled {
+					opacity: 0.5;
+					background: #f5f5f5;
+				}
+				
+				.option-content {
+					display: flex;
+					flex-direction: column;
+					align-items: center;
+					margin-right: 24rpx;
+					
+					.length-number {
+						font-size: 48rpx;
+						font-weight: 600;
+						color: #007AFF;
+					}
+					
+					.length-label {
+						font-size: 24rpx;
+						color: #666;
+					}
+				}
+				
+				.option-info {
+					flex: 1;
+					
+					.word-count {
+						font-size: 28rpx;
+						color: #333;
+						display: block;
+					}
+					
+					.progress-info {
+						margin-top: 8rpx;
+						
+						.status {
+							font-size: 24rpx;
+							
+							&.completed {
+								color: #4CAF50;
+							}
+							
+							&.locked {
+								color: #999;
+							}
+							
+							&.available {
+								color: #007AFF;
+							}
+						}
+					}
+				}
+				
+				.option-progress {
+					position: absolute;
+					bottom: 0;
+					left: 0;
+					right: 0;
+					height: 6rpx;
+					background: #f0f0f0;
+					border-radius: 0 0 16rpx 16rpx;
+					overflow: hidden;
+					
+					.progress-bar {
+						height: 100%;
+						background: linear-gradient(90deg, #007AFF, #4CAF50);
+						transition: width 0.3s;
+					}
+				}
+			}
+		}
+		
+		.popup-actions {
+			display: flex;
+			gap: 20rpx;
+			margin-top: 40rpx;
+			
+			.cancel-btn, .confirm-btn {
+				flex: 1;
+				height: 80rpx;
+				border-radius: 12rpx;
+				font-size: 30rpx;
+			}
+			
+			.cancel-btn {
+				background: #f5f5f5;
+				color: #666;
+			}
+			
+			.confirm-btn {
+				background: #007AFF;
+				color: white;
+				
+				&:disabled {
+					background: #ccc;
 				}
 			}
 		}

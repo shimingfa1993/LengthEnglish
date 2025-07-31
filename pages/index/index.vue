@@ -15,36 +15,28 @@
 			</view>
 			
 			<view class="progress-cards">
-				<view class="progress-card today" @click="startTodayLearning">
-					<view class="card-header">
-						<view class="card-title">今日学习</view>
-						<view class="card-count" v-if="currentLearningLength">
-							{{ learningStats.todayLearned }}/{{ learningStats.todayTarget }}
-						</view>
-						<view class="card-count" v-else>
-							点击开始
-						</view>
+				<!-- 将三个卡片放在一行 -->
+				<view class="stats-row">
+					<!-- 今日学习卡片 -->
+					<view class="progress-card today" @click="startTodayLearning">
+						<text class="card-title">今日学习</text>
+						<text class="card-count">点击开始</text>
+						<text class="hint-text">选择长度</text>
 					</view>
-					<progress 
-						v-if="currentLearningLength" 
-						:percent="learningStats.todayProgress" 
-						stroke-width="8" 
-						activeColor="#007AFF"/>
-					<view v-else class="start-hint">
-						<text class="hint-text">选择字母数开始学习</text>
+					
+					<!-- 连续学习卡片 -->
+					<view class="progress-card streak">
+						<text class="card-title">连续学习</text>
+						<text class="streak-count">{{ learningStats.learningStreak }}</text>
+						<text class="streak-unit">天</text>
 					</view>
-				</view>
-				
-				<view class="progress-card streak">
-					<text class="card-title">连续学习</text>
-					<text class="streak-count">{{ learningStats.learningStreak }}</text>
-					<text class="streak-unit">天</text>
-				</view>
-				
-				<view class="progress-card total">
-					<text class="card-title">总词汇量</text>
-					<text class="total-count">{{ learningStats.totalWords }}</text>
-					<text class="total-unit">个</text>
+					
+					<!-- 总词汇量卡片 -->
+					<view class="progress-card total">
+						<text class="card-title">总词汇量</text>
+						<text class="total-count">{{ learningStats.totalWords }}</text>
+						<text class="total-unit">个</text>
+					</view>
 				</view>
 			</view>
 			
@@ -156,42 +148,24 @@
 		<uni-popup ref="lengthSelector" type="center" :mask-click="false">
 		<view class="length-selector-popup">
 			<view class="popup-header">
-			<text class="popup-title">选择学习的单词长度</text>
-			<text class="popup-subtitle">建议从短单词开始学习</text>
+			<text class="popup-title">今日学习</text>
+			<text class="popup-subtitle">选择单词长度开始学习，或使用随机翻译</text>
 			</view>
 			
-			<view class="length-options">
-			<view 
+			<!-- 长度选择网格 -->
+			<view class="length-grid">
+				<view 
 				v-for="length in availableLengths" 
 				:key="length"
-				class="length-option"
-				:class="{
-				'disabled': isLengthLocked(length),
-				'completed': isLengthCompleted(length),
-				'current': length === selectedLength
-				}"
+				class="length-card"
+				:class="{ 'selected': length === selectedLength }"
 				@click="selectLength(length)">
 				
-				<view class="option-content">
-				<text class="length-number">{{ length }}</text>
-				<text class="length-label">字母</text>
-				</view>
-				
-				<view class="option-info">
-				<text class="word-count">{{ getWordCount(length) }}个单词</text>
-				<view class="progress-info">
-					<text v-if="isLengthCompleted(length)" class="status completed">✓ 已完成</text>
-					<text v-else-if="isLengthLocked(length)" class="status locked">🔒 未解锁</text>
-					<text v-else class="status available">可学习</text>
-				</view>
-				</view>
-				
-				<!-- 进度条 -->
-				<view class="option-progress">
-				<view 
-					class="progress-bar"
-					:style="{ width: getLengthProgress(length) + '%' }">
-				</view>
+				<view class="card-content">
+					<text class="length-number">{{ length }}</text>
+					<text class="length-label">字母</text>
+					<text class="word-count">{{ getWordCount(length) }}个单词</text>
+					<text class="status">可学习</text>
 				</view>
 			</view>
 			</view>
@@ -200,7 +174,7 @@
 			<button class="cancel-btn" @click="closeLengthSelector">取消</button>
 			<button 
 				class="confirm-btn" 
-				:disabled="!selectedLength || isLengthLocked(selectedLength)"
+				:disabled="!selectedLength"
 				@click="confirmLengthSelection">
 				开始学习
 			</button>
@@ -213,7 +187,7 @@
 <script>
 	import baiduTranslate from '@/utils/baiduTranslate.js';
 import localWordsData from '@/utils/localWordsData.js';
-import * as LearningProgress from '@/utils/learningProgress.js';
+import LearningProgress from '@/utils/learningProgress.js';
 import { api } from '@/utils/api.js';
 import uniPopup from '@/uni_modules/uni-popup/components/uni-popup/uni-popup.vue';
 
@@ -316,25 +290,25 @@ import uniPopup from '@/uni_modules/uni-popup/components/uni-popup/uni-popup.vue
 					};
 					
 				} catch (error) {
-					console.error('获取学习统计失败:', error);
-					
-					// 如果是认证错误，跳转到登录页
-					if (error.statusCode === 401) {
-						uni.removeStorageSync('token');
-						uni.removeStorageSync('userId');
-						uni.reLaunch({
-							url: '/pages/login/index'
-						});
-						return;
-					}
-					
-					// 其他错误，使用本地数据作为备用
-					this.learningStats = LearningProgress.getLearningStats();
-					
-					uni.showToast({
-						title: '获取学习数据失败',
-						icon: 'none'
+				console.error('获取学习统计失败:', error);
+				
+				// 如果是认证错误，跳转到登录页
+				if (error.statusCode === 401) {
+					uni.removeStorageSync('token');
+					uni.removeStorageSync('userId');
+					uni.reLaunch({
+						url: '/pages/login/index'
 					});
+					return;
+				}
+				
+				// 其他错误，使用本地数据作为备用
+				this.learningStats = await LearningProgress.getLearningStats();
+				
+				uni.showToast({
+					title: '获取学习数据失败',
+					icon: 'none'
+				});
 				} finally {
 					this.loading = false;
 				}
@@ -444,16 +418,22 @@ import uniPopup from '@/uni_modules/uni-popup/components/uni-popup/uni-popup.vue
 				});
 			},
 			
+			// 开始指定长度的学习
+startLearningWithLength(length) {
+	this.currentLearningLength = length;
+	uni.setStorageSync('currentLearningLength', length);
+	
+	// 直接跳转到学习页面
+	uni.navigateTo({
+		url: `/pages/learning/index?length=${length}`
+	});
+},
+			
 			// 开始今日学习
-			startTodayLearning() {
-				if (!this.currentLearningLength) {
-					// 首次学习，显示字母数选择弹窗
-					this.showLengthSelector();
-				} else {
-					// 继续当前长度的学习
-					this.continueCurrentLearning();
-				}
-			},
+startTodayLearning() {
+	// 总是显示字母数选择弹窗
+	this.showLengthSelector();
+},
 			
 			// 显示字母数选择弹窗
 			showLengthSelector() {
@@ -463,33 +443,49 @@ import uniPopup from '@/uni_modules/uni-popup/components/uni-popup/uni-popup.vue
 			},
 			
 			// 关闭字母数选择弹窗
-			closeLengthSelector() {
-				this.selectedLength = null;
-				this.$refs.lengthSelector.close();
-			},
+closeLengthSelector() {
+	this.selectedLength = null;
+	this.$refs.lengthSelector.close();
+},
 			
 			// 选择字母数
-			selectLength(length) {
-				if (this.isLengthLocked(length)) {
-					uni.showToast({
-						title: `请先完成${length-1}字母单词学习`,
-						icon: 'none'
-					});
-					return;
-				}
-				this.selectedLength = length;
-			},
+selectLength(length) {
+	console.log('点击选择长度:', length);
+	if (this.isLengthLocked(length)) {
+		uni.showToast({
+			title: `请先完成${length-1}字母单词学习`,
+			icon: 'none'
+		});
+		return;
+	}
+	this.selectedLength = length;
+	console.log('设置selectedLength为:', this.selectedLength);
+},
 			
 			// 确认字母数选择
-			confirmLengthSelection() {
-				if (!this.selectedLength) return;
-				
-				this.currentLearningLength = this.selectedLength;
-				uni.setStorageSync('currentLearningLength', this.selectedLength);
-				
-				this.closeLengthSelector();
-				this.startLearningWords(this.selectedLength);
-			},
+confirmLengthSelection() {
+	console.log('确认选择，当前selectedLength:', this.selectedLength);
+	if (!this.selectedLength) {
+		uni.showToast({
+			title: '请先选择单词长度',
+			icon: 'none'
+		});
+		return;
+	}
+	
+	// 先保存选中的长度
+	const lengthToUse = this.selectedLength;
+	this.currentLearningLength = lengthToUse;
+	uni.setStorageSync('currentLearningLength', lengthToUse);
+	
+	// 关闭弹窗
+	this.closeLengthSelector();
+	
+	// 跳转到学习页面，使用保存的长度值
+	const url = `/pages/learning/index?length=${lengthToUse}`;
+	console.log('跳转URL:', url);
+	uni.navigateTo({ url });
+},
 			
 			// 开始学习指定长度的单词
 			startLearningWords(length) {
@@ -536,13 +532,10 @@ import uniPopup from '@/uni_modules/uni-popup/components/uni-popup/uni-popup.vue
 			},
 			
 			// 检查字母数是否被锁定
-			isLengthLocked(length) {
-				if (length === 3) return false; // 3字母永远可用
-				
-				// 检查前一个长度是否完成
-				const prevLength = length - 1;
-				return !this.isLengthCompleted(prevLength);
-			},
+isLengthLocked(length) {
+	// 所有长度都可用
+	return false;
+},
 			
 			// 检查字母数是否完成
 			isLengthCompleted(length) {
@@ -1244,72 +1237,57 @@ import uniPopup from '@/uni_modules/uni-popup/components/uni-popup/uni-popup.vue
 		}
 		
 		.progress-cards {
-			display: flex;
-			justify-content: space-between;
 			margin-bottom: 30rpx;
 			
-			.progress-card {
-				flex: 1;
-				background: rgba(255, 255, 255, 0.2);
-				border-radius: 15rpx;
-				padding: 25rpx;
-				margin: 0 10rpx;
+			.stats-row {
 				display: flex;
-				flex-direction: column;
-				align-items: center;
+				justify-content: space-between;
+				gap: 15rpx;
 				
-				&.today {
-					cursor: pointer;
+				.progress-card {
+					flex: 1;
+					background: rgba(255, 255, 255, 0.2);
+					border-radius: 15rpx;
+					padding: 25rpx 15rpx;
+					display: flex;
+					flex-direction: column;
+					align-items: center;
 					transition: transform 0.2s;
 					
-					&:active {
-						transform: scale(0.95);
-					}
-					
-					.card-header {
-						display: flex;
-						justify-content: space-between;
-						align-items: center;
-						flex-direction: column;
-						width: 100%;
-						margin-bottom: 15rpx;
-						
-						.card-title {
-							font-size: 24rpx;
-						}
-						
-						.card-count {
-							font-size: 28rpx;
-							font-weight: bold;
+					&.today {
+						&:active {
+							transform: scale(0.95);
 						}
 					}
 					
-					.start-hint {
-						padding: 10rpx 0;
-						
-						.hint-text {
-							font-size: 22rpx;
-							opacity: 0.8;
-							text-align: center;
-						}
+					.card-title {
+						font-size: 24rpx;
+						margin-bottom: 10rpx;
+						opacity: 0.8;
+						text-align: center;
 					}
-				}
-				
-				.card-title {
-					font-size: 24rpx;
-					margin-bottom: 10rpx;
-					opacity: 0.8;
-				}
-				
-				.streak-count, .total-count {
-					font-size: 36rpx;
-					font-weight: bold;
-					margin-bottom: 5rpx;
-				}
-				
-				.streak-unit, .total-unit {
-					font-size: 20rpx;
-					opacity: 0.8;
+					
+					.card-count {
+						font-size: 28rpx;
+						font-weight: bold;
+						margin-bottom: 5rpx;
+					}
+					
+					.hint-text {
+						font-size: 20rpx;
+						opacity: 0.8;
+					}
+					
+					.streak-count, .total-count {
+						font-size: 36rpx;
+						font-weight: bold;
+						margin-bottom: 5rpx;
+					}
+					
+					.streak-unit, .total-unit {
+						font-size: 20rpx;
+						opacity: 0.8;
+					}
 				}
 			}
 		}
@@ -1386,97 +1364,57 @@ import uniPopup from '@/uni_modules/uni-popup/components/uni-popup/uni-popup.vue
 			}
 		}
 		
-		.length-options {
+		.length-grid {
+			display: grid;
+			grid-template-columns: repeat(3, 1fr);
+			gap: 20rpx;
+			margin: 40rpx 0;
 			max-height: 500rpx;
 			overflow-y: auto;
 			
-			.length-option {
-				display: flex;
-				align-items: center;
-				padding: 24rpx;
-				margin-bottom: 16rpx;
+			.length-card {
+				background: #f8f9fa;
 				border-radius: 16rpx;
-				border: 2rpx solid #f0f0f0;
-				position: relative;
-				transition: all 0.3s;
+				padding: 30rpx 20rpx;
+				text-align: center;
+				border: 2rpx solid transparent;
+				transition: all 0.3s ease;
+				cursor: pointer;
 				
-				&.current {
-					border-color: #007AFF;
-					background: #f0f8ff;
+				&.selected {
+					background: #e3f2fd;
+					border-color: #2196f3;
 				}
 				
-				&.completed {
-					background: #f0fff0;
-					border-color: #4CAF50;
+				&:active {
+					transform: scale(0.95);
 				}
 				
-				&.disabled {
-					opacity: 0.5;
-					background: #f5f5f5;
-				}
-				
-				.option-content {
+				.card-content {
 					display: flex;
 					flex-direction: column;
 					align-items: center;
-					margin-right: 24rpx;
+					gap: 8rpx;
 					
 					.length-number {
 						font-size: 48rpx;
-						font-weight: 600;
-						color: #007AFF;
+						font-weight: bold;
+						color: #333;
 					}
 					
 					.length-label {
 						font-size: 24rpx;
 						color: #666;
 					}
-				}
-				
-				.option-info {
-					flex: 1;
 					
 					.word-count {
-						font-size: 28rpx;
-						color: #333;
-						display: block;
+						font-size: 22rpx;
+						color: #999;
 					}
 					
-					.progress-info {
-						margin-top: 8rpx;
-						
-						.status {
-							font-size: 24rpx;
-							
-							&.completed {
-								color: #4CAF50;
-							}
-							
-							&.locked {
-								color: #999;
-							}
-							
-							&.available {
-								color: #007AFF;
-							}
-						}
-					}
-				}
-				
-				.option-progress {
-					position: absolute;
-					bottom: 0;
-					left: 0;
-					right: 0;
-					height: 6rpx;
-					background: #f0f0f0;
-					border-radius: 0 0 16rpx 16rpx;
-					overflow: hidden;
-					
-					.progress-bar {
-						height: 100%;
-						background: linear-gradient(90deg, #007AFF, #4CAF50);
-						transition: width 0.3s;
+					.status {
+						font-size: 20rpx;
+						color: #4caf50;
 					}
 				}
 			}

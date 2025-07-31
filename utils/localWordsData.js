@@ -20,12 +20,18 @@ class LocalWordsData {
 	}
 
 	// 根据单词长度获取所有单词
+	// 在getWordsByLength方法中添加调试
 	async getWordsByLength(length) {
 		try {
+			console.log('localWordsData: 请求长度', length, '类型:', typeof length);
 			const data = this.wordsData;
+			console.log('wordsData是否存在:', !!data);
+			
 			const lengthData = data[length.toString()];
+			console.log(`长度${length}的数据:`, lengthData ? '存在' : '不存在');
 			
 			if (!lengthData) {
+				console.log('可用的长度:', Object.keys(data));
 				return [];
 			}
 
@@ -45,6 +51,7 @@ class LocalWordsData {
 				}
 			}
 
+			console.log(`长度${length}共找到${allWords.length}个单词`);
 			return allWords;
 		} catch (error) {
 			console.error('获取单词失败:', error);

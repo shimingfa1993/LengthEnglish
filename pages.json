@@ -21,6 +21,14 @@
 			}
 		},
 		{
+			"path": "pages/learning/index",
+			"style": {
+				"navigationBarTitleText": "今日学习",
+				"navigationBarBackgroundColor": "#667eea",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
 			"path": "pages/wordlist/index",
 			"style": {
 				"navigationBarTitleText": "单词列表",
